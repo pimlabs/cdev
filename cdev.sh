@@ -15,7 +15,7 @@ cdev-ensure() {
 
   if ! tmux has-session -t "$name" 2>/dev/null; then
     tmux new-session -d -s "$name" -c "$dir" \
-      "CLAUDE_CONFIG_DIR=$config_dir claude remote-control --name '$name'"
+      "CLAUDE_CONFIG_DIR=$config_dir claude remote-control --name '$name' --spawn=worktree"
     tmux set-environment -t "$name" CDEV_ACCOUNT "$account"
   fi
 
