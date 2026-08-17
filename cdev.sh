@@ -23,12 +23,17 @@ cdev-ensure() {
   grep -qxF "$name $account $dir" "$CDEV_REGISTRY" || echo "$name $account $dir" >> "$CDEV_REGISTRY"
 }
 
-# One-time interactive login for an account. Safe to call again, no-ops if
-# the account's config dir already exists. Deliberately NOT called from
-# cdev-ensure: that path also runs at boot with no attached terminal, and an
-# interactive login prompt there would just hang the restore service.
+# One-time interactive login for an account, run inside the target project
+# directory. Claude Code's first-run trust dialog is never saved for $HOME,
+# so this has to happen in $dir, not wherever the SSH session happens to
+# land, or the login "succeeds" but the project still isn't trusted. Safe to
+# call again, no-ops if the account's config dir already exists. Deliberately
+# NOT called from cdev-ensure: that path also runs at boot with no attached
+# terminal, and an interactive login/trust prompt there would just hang the
+# restore service.
 cdev-init() {
-  local account="${1:?Usage: cdev-init <account>}"
+  local account="${1:?Usage: cdev-init <account> <dir>}"
+  local dir="${2:?Usage: cdev-init <account> <dir>}"
   local config_dir="$HOME/.claude"
   [ "$account" != "personal" ] && config_dir="$HOME/.claude-$account"
 
@@ -37,8 +42,8 @@ cdev-init() {
     return 0
   fi
 
-  echo "No login yet for account '$account', starting one-time login..."
-  CLAUDE_CONFIG_DIR="$config_dir" claude
+  echo "No login yet for account '$account', starting one-time login in $dir..."
+  ( cd "$dir" && CLAUDE_CONFIG_DIR="$config_dir" claude )
 }
 
 # Interactive entry point: log the account in first if needed, ensure the
@@ -48,12 +53,14 @@ cdev() {
     echo "Usage: cdev <project-name> [account] [dir]"
     return 1
   fi
+  local name="$1"
   local account="${2:-personal}"
+  local dir="${3:-$HOME/projects/$name}"
   local config_dir="$HOME/.claude"
   [ "$account" != "personal" ] && config_dir="$HOME/.claude-$account"
-  [ -d "$config_dir" ] || cdev-init "$account"
-  cdev-ensure "$1" "$2" "$3"
-  tmux attach -t "$1"
+  [ -d "$config_dir" ] || cdev-init "$account" "$dir"
+  cdev-ensure "$name" "$account" "$dir"
+  tmux attach -t "$name"
 }
 
 cdev-accounts() { ls -d "$HOME/.claude" "$HOME"/.claude-* 2>/dev/null; }
