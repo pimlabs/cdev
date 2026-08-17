@@ -23,12 +23,35 @@ cdev-ensure() {
   grep -qxF "$name $account $dir" "$CDEV_REGISTRY" || echo "$name $account $dir" >> "$CDEV_REGISTRY"
 }
 
-# Interactive entry point: ensure the session exists, then attach to it.
+# One-time interactive login for an account. Safe to call again, no-ops if
+# the account's config dir already exists. Deliberately NOT called from
+# cdev-ensure: that path also runs at boot with no attached terminal, and an
+# interactive login prompt there would just hang the restore service.
+cdev-init() {
+  local account="${1:?Usage: cdev-init <account>}"
+  local config_dir="$HOME/.claude"
+  [ "$account" != "personal" ] && config_dir="$HOME/.claude-$account"
+
+  if [ -d "$config_dir" ]; then
+    echo "Account '$account' already initialized ($config_dir)."
+    return 0
+  fi
+
+  echo "No login yet for account '$account', starting one-time login..."
+  CLAUDE_CONFIG_DIR="$config_dir" claude
+}
+
+# Interactive entry point: log the account in first if needed, ensure the
+# session exists, then attach to it.
 cdev() {
   if [ -z "${1:-}" ]; then
     echo "Usage: cdev <project-name> [account] [dir]"
     return 1
   fi
+  local account="${2:-personal}"
+  local config_dir="$HOME/.claude"
+  [ "$account" != "personal" ] && config_dir="$HOME/.claude-$account"
+  [ -d "$config_dir" ] || cdev-init "$account"
   cdev-ensure "$1" "$2" "$3"
   tmux attach -t "$1"
 }
