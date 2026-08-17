@@ -1,0 +1,12 @@
+[Unit]
+Description=Restore cdev tmux/Claude Code sessions after boot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.cdev-restore-all.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=default.target
