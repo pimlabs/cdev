@@ -41,7 +41,7 @@ creating) a project session.
 | Command | Does |
 |---|---|
 | `cdev <name> [account] [dir]` | Default action. Create (if new) and attach to a session. Account defaults to `personal`, maps to `~/.claude-<account>`. Logs the account in first if it never has been. If the session exits immediately because the account isn't trusted in `dir` yet, `cdev` now detects that and prints the fix directly, instead of leaving a bare tmux `[exited]` with no explanation. |
-| `cdev status` | List running sessions with their account, attach state, and session uptime. The LOGIN column always prints the literal word `unknown` for every session. It is a placeholder, not a check: cdev does not read Claude Code's local credential expiry, so it cannot tell a logged-in session from an expired one. |
+| `cdev status` | List running sessions with their account, attach state, and session uptime. There is no login/credential column: cdev does not read Claude Code's local credential expiry, so it cannot tell a logged-in session from an expired one. |
 | `cdev kill <name>` | Stop a session and remove it from the reboot registry. |
 | `cdev init <account> <dir>` | One-time interactive login for an account, run inside `<dir>` so the trust dialog applies to that project, not `$HOME`. No-ops if it's already logged in. Runs automatically from `cdev` when needed. |
 | `cdev accounts` | List which `~/.claude*` config dirs (accounts) exist. |
@@ -157,6 +157,6 @@ doesn't exist, the health check exits immediately and does nothing.
   needs `/login` again before assuming something broke. `claude` warns
   in-terminal when a login is within three days of expiring, but that
   warning only shows up if someone's looking at the terminal when it
-  appears. `cdev status` does not help here either: its LOGIN column is a
-  fixed `unknown` placeholder, so an expired session looks exactly like a
+  appears. `cdev status` does not help here either: it has no login or
+  credential column at all, so an expired session looks exactly like a
   healthy one.

@@ -21,7 +21,7 @@ teardown() {
 @test "account 'personal' maps to ~/.claude" {
   mkdir -p "$TEST_HOME/.claude"
 
-  run cdev-init personal /any/dir
+  run _cdev-init personal /any/dir
   [ "$status" -eq 0 ]
   [[ "$output" == *"$TEST_HOME/.claude)"* ]]
 }
@@ -29,7 +29,7 @@ teardown() {
 @test "a non-personal account maps to ~/.claude-<account>" {
   mkdir -p "$TEST_HOME/.claude-work"
 
-  run cdev-init work /any/dir
+  run _cdev-init work /any/dir
   [ "$status" -eq 0 ]
   [[ "$output" == *"$TEST_HOME/.claude-work)"* ]]
 }
@@ -37,9 +37,9 @@ teardown() {
 @test "two different non-personal accounts get two different config dirs" {
   mkdir -p "$TEST_HOME/.claude-alpha" "$TEST_HOME/.claude-beta"
 
-  run cdev-init alpha /any/dir
+  run _cdev-init alpha /any/dir
   [[ "$output" == *"$TEST_HOME/.claude-alpha)"* ]]
 
-  run cdev-init beta /any/dir
+  run _cdev-init beta /any/dir
   [[ "$output" == *"$TEST_HOME/.claude-beta)"* ]]
 }

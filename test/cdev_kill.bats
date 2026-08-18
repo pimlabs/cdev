@@ -26,7 +26,7 @@ teardown() {
 }
 
 @test "cdev-kill removes only the matching registry line" {
-  cdev-kill beta
+  _cdev-kill beta
 
   run grep -c '^beta ' "$CDEV_REGISTRY"
   [ "$output" = "0" ]
@@ -40,7 +40,7 @@ teardown() {
 }
 
 @test "cdev-kill on a name not in the registry leaves it untouched" {
-  cdev-kill nonexistent
+  _cdev-kill nonexistent
 
   local total_lines
   total_lines=$(wc -l < "$CDEV_REGISTRY")
@@ -50,7 +50,7 @@ teardown() {
 @test "cdev-kill on a name with regex metacharacters doesn't wipe the registry" {
   echo '[bracket personal /home/x/projects/bracket' >> "$CDEV_REGISTRY"
 
-  cdev-kill '[bracket'
+  _cdev-kill '[bracket'
 
   grep -qxF "alpha personal /home/x/projects/alpha" "$CDEV_REGISTRY"
   grep -qxF "beta work /home/x/projects/beta" "$CDEV_REGISTRY"

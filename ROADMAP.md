@@ -47,6 +47,10 @@ Ships with:
 - [x] `./cdev.sh <args>` also works directly, not only `source cdev.sh` then
       `cdev <args>`, added afterward once local testing without installing
       turned out to need a source step every time.
+- [x] Every internal helper renamed with a leading underscore
+      (`_cdev-status`, `_cdev-kill`, `_cdev-init`, and so on), so `cdev` is
+      the sole function meant to be called directly. `cdev-ensure` stays
+      unprefixed, since `cdev-restore-all.sh` calls it by that exact name.
 
 A pre-merge review pass also found and fixed 3 issues before this track
 shipped: a shell-injection path in the tmux launch command, a `cdev-kill`
@@ -75,9 +79,11 @@ Natural extension of `cdev-status`, which at curation time only showed name,
 account, and attach state.
 
 - [x] Add per-session uptime (tmux session start time) to `cdev-status`.
-- [ ] Add per-account login-expiry countdown to `cdev-status`. Not done: the
-      LOGIN column shipped as a literal `unknown` placeholder, pending a safe
-      way to read Claude Code's local credential expiry.
+- [ ] Add per-account login-expiry countdown to `cdev-status`. Not done: a
+      LOGIN column was tried and then removed entirely, since it printed the
+      literal word `unknown` on every single run and carried no information.
+      Still pending a safe way to read Claude Code's local credential expiry
+      before this column comes back for real.
 - [x] Optional webhook/ntfy notification when a session disappears from tmux
       unexpectedly (crash) versus a clean `cdev-kill`.
 

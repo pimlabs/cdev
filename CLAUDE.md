@@ -36,12 +36,12 @@ bats test/            # needs bats-core installed, it is not vendored here
 ```
 
 - `test/cdev_ensure.bats` registry dedup in `cdev-ensure`
-- `test/cdev_kill.bats` registry line removal in `cdev-kill`
+- `test/cdev_kill.bats` registry line removal in `_cdev-kill` (the `cdev kill` subcommand)
 - `test/account_config_dir.bats` account to `CLAUDE_CONFIG_DIR` mapping
 - `test/install_shell_detection.bats` rc file picked by `install.sh`
 
-The suite does not cover the `cdev()` dispatcher, `cdev-doctor`,
-`cdev-status`, or `cdev-healthcheck.sh`. Those are still hand-verified.
+The suite does not cover the `cdev()` dispatcher, `_cdev-doctor`,
+`_cdev-status`, or `cdev-healthcheck.sh`. Those are still hand-verified.
 
 There is no automated way to exercise the install/reboot flow. Verifying a
 change means reasoning through the script by hand, or running it against a
@@ -54,26 +54,26 @@ past the session.
 Two halves that share state through a flat file, not through each other:
 
 - **`cdev.sh`** (sourced into `~/.bashrc` at install time) is the interactive
-  half. `cdev()` itself is now a thin dispatcher: it routes `cdev status`,
-  `cdev kill`, `cdev init`, `cdev accounts`, `cdev doctor`, `cdev version`,
-  and `cdev help` to the functions of the same shape (`cdev-status`,
-  `cdev-kill`, `cdev-init`, `cdev-accounts`, unchanged in name and behavior
-  from before the dispatcher existed), and falls through to `cdev-attach` for
-  anything else, so `cdev <name> [account] [dir]` still works exactly as the
-  old top-level `cdev` function did. `cdev-attach` holds the login-then-
-  ensure-then-tmux-attach logic that used to live directly in `cdev`.
-  `cdev-doctor` and `cdev-help` are new: `cdev-doctor` reports the installed
-  version, systemd unit state, and linger state, guarding every
-  `systemctl`/`loginctl` call so a box without systemd reports that fact
-  instead of crashing or claiming the units are missing; `cdev-help` prints
-  usage. One trap in `cdev-status`: its LOGIN column is a hardcoded
-  `unknown` string, not a check. cdev has no way to read Claude Code's
-  credential expiry, and the column only reserves the layout for a future
-  one. Do not describe it as a login check in docs or commit messages, and
-  do not treat it as a signal.
-  `cdev-ensure` inside this file is the one function also called
-  non-interactively, it must stay safe to run with no attached terminal (no
-  prompts, no blocking reads) since the boot path depends on that.
+  half. `cdev()` is the dispatcher and the only function meant to be called
+  directly: it routes `cdev status`, `cdev kill`, `cdev init`,
+  `cdev accounts`, `cdev doctor`, `cdev version`, and `cdev help` to
+  underscore-prefixed internal functions (`_cdev-status`, `_cdev-kill`,
+  `_cdev-init`, `_cdev-accounts`, `_cdev-doctor`, `_cdev-doctor-unit`,
+  `_cdev-help`, `_cdev-format-duration`, `_cdev-config-dir`), and falls
+  through to `_cdev-attach` for anything else, so `cdev <name> [account]
+  [dir]` still works exactly as the old top-level `cdev` function did. The
+  leading underscore marks these as implementation detail, not a supported
+  interface, so nothing outside `cdev.sh` itself should call them by name.
+  `_cdev-attach` holds the login-then-ensure-then-tmux-attach logic that used
+  to live directly in `cdev`. `_cdev-doctor` reports the installed version,
+  systemd unit state, and linger state, guarding every `systemctl`/`loginctl`
+  call so a box without systemd reports that fact instead of crashing or
+  claiming the units are missing; `_cdev-help` prints usage.
+  `cdev-ensure` is the one deliberate exception, kept without a leading
+  underscore because `cdev-restore-all.sh` calls it directly by that exact
+  name. It is also the one function also called non-interactively, so it
+  must stay safe to run with no attached terminal (no prompts, no blocking
+  reads) since the boot path depends on that.
 - **`cdev-restore-all.sh`** is the non-interactive half. It sources
   `~/.cdev.sh` and calls `cdev-ensure` directly by name for every registered
   session, unaffected by the `cdev()` dispatcher above. Run at boot by
@@ -82,7 +82,7 @@ Two halves that share state through a flat file, not through each other:
   no-ops on sessions that already exist.
 - **`cdev-healthcheck.sh`** is a separate, opt-in non-interactive check. It
   compares the registry against live tmux sessions and reports any session
-  that disappeared without going through `cdev-kill`. It is silent and a
+  that disappeared without going through `cdev kill`. It is silent and a
   no-op unless `~/.cdev-notify` exists. Run by a second systemd unit pair,
   `cdev-healthcheck.service` + `cdev-healthcheck.timer`, every 5 minutes,
   installed and enabled by `install.sh` alongside the boot-time
@@ -90,13 +90,13 @@ Two halves that share state through a flat file, not through each other:
 
 The registry (`~/.cdev-sessions`, one `name account dir` line per session) is
 the only thing connecting the interactive and non-interactive halves. `cdev`
-appends to it when it creates a session, `cdev-kill` deletes the matching
+appends to it when it creates a session, `_cdev-kill` deletes the matching
 line; anything that dies some other way (crash, reboot) simply stays in the
 file and gets recreated on the next boot, or flagged by
 `cdev-healthcheck.sh` if notifications are configured.
 
 `CDEV_VERSION` is embedded as a variable near the top of `cdev.sh`.
-`cdev-doctor` compares the installed version (`$CDEV_VERSION` from the
+`_cdev-doctor` compares the installed version (`$CDEV_VERSION` from the
 sourced `~/.cdev.sh`) against the version in whatever `cdev.sh` sits in
 `$PWD`, when run from inside this repo's checkout. That comparison is
 best-effort: it is skipped entirely when no `cdev.sh` is found in the
@@ -107,7 +107,7 @@ Per-account isolation runs entirely through `CLAUDE_CONFIG_DIR`: account
 (this mirrors the two-Claude-config-dir setup documented in the user's global
 `MACHINE.md`, but here it's driving *account* separation for Remote Control
 sessions on a server, not the personal/work app split on a laptop). This is
-why `cdev-init` has to run inside the target project directory: Claude Code's
+why `_cdev-init` has to run inside the target project directory: Claude Code's
 first-run trust dialog is saved per-directory, and never for `$HOME`, so
 logging in from wherever the SSH session happens to land trusts the wrong
 path.
