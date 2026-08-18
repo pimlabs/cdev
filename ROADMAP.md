@@ -44,6 +44,15 @@ Ships with:
 - [x] `cdev help` prints the subcommand table above plus the defaults
       (`account` defaults to `personal`, `dir` defaults to
       `~/projects/<name>`), replacing README-reading for day-to-day use.
+- [x] `./cdev.sh <args>` also works directly, not only `source cdev.sh` then
+      `cdev <args>`, added afterward once local testing without installing
+      turned out to need a source step every time.
+
+A pre-merge review pass also found and fixed 3 issues before this track
+shipped: a shell-injection path in the tmux launch command, a `cdev-kill`
+bug that could wipe the entire registry on a session name grep couldn't
+parse, and a false-positive workspace-trust diagnosis on a slow session
+start. Full detail in [CHANGELOG.md](CHANGELOG.md).
 
 ## Known issues (low effort)
 
