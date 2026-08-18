@@ -251,6 +251,8 @@ cdev-doctor() {
 }
 
 cdev-help() {
+  echo "cdev $CDEV_VERSION"
+  echo ""
   cat <<'EOF'
 Usage: cdev <name> [account] [dir]
   Attaches to (creating if needed) a persistent session for <name>.
