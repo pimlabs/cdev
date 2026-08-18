@@ -313,3 +313,11 @@ cdev() {
       ;;
   esac
 }
+
+# Let `./cdev.sh <args>` work directly too, not only `source cdev.sh` then
+# `cdev <args>`. BASH_SOURCE[0] (this file's path) only equals $0 (the
+# running program's name) when the file is executed, not when it's sourced,
+# so this is a no-op for the installed, sourced-into-rc-file case.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  cdev "$@"
+fi

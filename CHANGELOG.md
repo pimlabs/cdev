@@ -13,6 +13,7 @@
 - Shell detection in install.sh to wire cdev.sh into matching rc file (.bashrc for bash, .zshrc for zsh)
 - shellcheck linting in CI
 - `cdev -- <name> [account] [dir]` to force attach mode when a project name collides with a subcommand word
+- `./cdev.sh <args>` now works directly, not just `source cdev.sh` then `cdev <args>`, for quick local testing without installing
 
 ### Fixed
 
