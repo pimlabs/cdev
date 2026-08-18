@@ -1,0 +1,20 @@
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Local env / secrets
+.env
+.env.*
+
+# Runtime state this project writes at install/run time, in case it ever
+# ends up inside the repo checkout instead of $HOME
+.cdev-sessions
+*.log
+
+# Manual worktrees
+.claude/worktrees/

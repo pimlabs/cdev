@@ -22,21 +22,36 @@ cd cdev
 source ~/.cdev.sh
 ```
 
-`install.sh` copies `cdev.sh` to `~/.cdev.sh`, sources it from `~/.bashrc`,
-and enables a `systemd --user` unit (`cdev-restore.service`) that recreates
-every registered session automatically after a reboot, no manual step
-needed. It also runs `sudo loginctl enable-linger` so that unit can start
-before any interactive login.
+`install.sh` copies `cdev.sh` to `~/.cdev.sh` and `cdev-healthcheck.sh` to
+`~/.cdev-healthcheck.sh`, detects whether the login shell is zsh or bash and
+sources `cdev.sh` from the matching rc file (`~/.zshrc` or `~/.bashrc`), and
+installs three `systemd --user` units. It enables `cdev-restore.service`,
+which recreates every registered session automatically after a reboot with no
+manual step, and `cdev-healthcheck.timer`, which drives
+`cdev-healthcheck.service` on a 5 minute interval (that one stays silent until
+you opt in, see below). It also runs `sudo loginctl enable-linger` so those
+units can start before any interactive login.
 
 ## Commands
 
+`cdev` is a single entrypoint, `cdev <subcommand> ...`. Anything that isn't a
+recognized subcommand falls through to the default action, attaching to (or
+creating) a project session.
+
 | Command | Does |
 |---|---|
-| `cdev <name> [account] [dir]` | Create (if new) and attach to a session. Account defaults to `personal`, maps to `~/.claude-<account>`. Logs the account in first if it never has been. |
-| `cdev-init <account> <dir>` | One-time interactive login for an account, run inside `<dir>` so the trust dialog applies to that project, not `$HOME`. No-ops if it's already logged in. Runs automatically from `cdev` when needed. |
-| `cdev-status` | List running sessions with their account and attach state. |
-| `cdev-kill <name>` | Stop a session and remove it from the reboot registry. |
-| `cdev-accounts` | List which `~/.claude*` config dirs (accounts) exist. |
+| `cdev <name> [account] [dir]` | Default action. Create (if new) and attach to a session. Account defaults to `personal`, maps to `~/.claude-<account>`. Logs the account in first if it never has been. If the session exits immediately because the account isn't trusted in `dir` yet, `cdev` now detects that and prints the fix directly, instead of leaving a bare tmux `[exited]` with no explanation. |
+| `cdev status` | List running sessions with their account, attach state, and session uptime. The LOGIN column always prints the literal word `unknown` for every session. It is a placeholder, not a check: cdev does not read Claude Code's local credential expiry, so it cannot tell a logged-in session from an expired one. |
+| `cdev kill <name>` | Stop a session and remove it from the reboot registry. |
+| `cdev init <account> <dir>` | One-time interactive login for an account, run inside `<dir>` so the trust dialog applies to that project, not `$HOME`. No-ops if it's already logged in. Runs automatically from `cdev` when needed. |
+| `cdev accounts` | List which `~/.claude*` config dirs (accounts) exist. |
+| `cdev doctor` | Check install health: installed vs repo version, whether the systemd units are enabled/active, and whether linger is on. |
+| `cdev version` | Print the installed cdev version. |
+| `cdev help` | Show usage and the subcommand list. |
+
+A project name can't collide with a subcommand word (`status`, `kill`, `init`,
+`accounts`, `doctor`, `version`, `help`), the same convention `git` and `npm`
+use. If it does, force attach mode with `cdev -- <name> [account] [dir]`.
 
 Must run inside `tmux` (which `cdev` handles for you), not a bare SSH shell,
 or the session dies the moment SSH disconnects. The first time `cdev` is
@@ -53,7 +68,7 @@ paste the code it shows back into that prompt. Do not use
 Control sessions. Sessions logged into different accounts show up under
 that account's own `claude.ai/code` session list, not a combined one.
 
-`cdev-init` is only wired into `cdev` itself, not into the boot-time restore
+`cdev init` is only wired into `cdev` itself, not into the boot-time restore
 path (`cdev-restore-all.sh`), an interactive login prompt with nothing
 attached to a terminal would just hang that service. So a brand new account
 still needs its first `cdev <name> <account>` run by hand over SSH, after
@@ -82,7 +97,7 @@ Remote Control. To check in from elsewhere:
 If a session doesn't show up, double check you're looking at the right
 account (`personal` sessions only appear in the personal account's list,
 `work` sessions only in that one) and that the systemd unit / tmux session
-is actually running (`cdev-status` on the server).
+is actually running (`cdev status` on the server).
 
 ## Basic tmux, if you're not used to it
 
@@ -101,26 +116,39 @@ alive either way.
 ## Reboot recovery
 
 `cdev` appends every session it creates to `~/.cdev-sessions` (one line:
-`name account dir`). `cdev-kill` removes the matching line so a
+`name account dir`). `cdev kill` removes the matching line so a
 deliberately-stopped session doesn't come back. `cdev-restore-all.sh` reads
 that file and calls `cdev-ensure` (the non-attaching half of `cdev`) for
 each entry; the systemd unit runs that script once at boot. A session that
 stops some other way (server reboot, crash) stays in the registry and gets
 recreated automatically the next time the box comes up.
 
+## Health-check notifications (optional)
+
+`cdev-healthcheck.timer` runs every 5 minutes and compares the registry
+against the tmux sessions actually running. If a registered session vanished
+without going through `cdev kill` (a crash, an OOM kill, anything other than
+a deliberate stop), it POSTs a plain-text message describing which session
+disappeared to a webhook URL.
+
+This is opt-in and silent by default. To turn it on, write the webhook URL
+into `~/.cdev-notify`, one line, nothing else to configure. If that file
+doesn't exist, the health check exits immediately and does nothing.
+
 ## Known issues
 
 - **`Error: Workspace not trusted`** when a fresh account tries to start
   `claude remote-control`: Claude Code's first-run trust dialog is never
-  saved for a home directory, on purpose. `cdev-init` runs the login step
-  inside the target project directory for exactly this reason, if it
-  instead ran wherever the SSH session happened to land (typically `$HOME`),
-  login would "succeed" but the project directory would still come up
-  untrusted the moment `remote-control` tried to start there, and the
-  session dies immediately with no useful message beyond tmux's own
-  `[exited]`. An account whose config dir already got created by a broken
-  earlier attempt won't get walked through `cdev-init` again since it looks
-  already-initialized. Fix by hand once: `cd <dir> && CLAUDE_CONFIG_DIR=~/.claude-<account> claude`,
+  saved for a home directory, on purpose. `cdev` now detects this failure
+  automatically (the session exits immediately, `cdev` notices and prints
+  the fix instead of leaving a bare tmux `[exited]`). `cdev init` still runs
+  the login step inside the target project directory for the same reason,
+  if it instead ran wherever the SSH session happened to land (typically
+  `$HOME`), login would "succeed" but the project directory would still come
+  up untrusted the moment `remote-control` tried to start there. An account
+  whose config dir already got created by a broken earlier attempt won't get
+  walked through `cdev init` again since it looks already-initialized. Fix
+  by hand once: `cd <dir> && CLAUDE_CONFIG_DIR=~/.claude-<account> claude`,
   accept the trust prompt, exit, then retry `cdev`.
 - **Silent stalls on expired login**: a background or Remote Control session
   that outlives its login just stops making progress, no error, no
@@ -129,4 +157,6 @@ recreated automatically the next time the box comes up.
   needs `/login` again before assuming something broke. `claude` warns
   in-terminal when a login is within three days of expiring, but that
   warning only shows up if someone's looking at the terminal when it
-  appears.
+  appears. `cdev status` does not help here either: its LOGIN column is a
+  fixed `unknown` placeholder, so an expired session looks exactly like a
+  healthy one.

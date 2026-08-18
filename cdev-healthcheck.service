@@ -1,0 +1,6 @@
+[Unit]
+Description=Check cdev sessions against the registry and notify on unexpected loss
+
+[Service]
+Type=oneshot
+ExecStart=%h/.cdev-healthcheck.sh

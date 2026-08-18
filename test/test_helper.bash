@@ -1,0 +1,43 @@
+# Shared setup for the cdev bats suite.
+#
+# Nothing here may touch the real HOME, the real ~/.cdev-sessions registry,
+# or a real tmux/systemd. Every test that needs those points HOME (and, for
+# cdev.sh, CDEV_REGISTRY) at a throwaway temp directory created in its own
+# setup(), and stubs any external command it calls by putting a fake
+# executable earlier on PATH.
+
+CDEV_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Create a temp directory, prepend it to PATH, and remember it in $STUB_BIN
+# so write_stub can drop fake executables into it and teardown can remove it.
+stub_bin_dir() {
+  STUB_BIN="$(mktemp -d)"
+  PATH="$STUB_BIN:$PATH"
+}
+
+# write_stub <name> <body>
+# Writes an executable fake command named <name> into $STUB_BIN. <body> is
+# shell code that becomes the stub's script body, so it can inspect "$@" and
+# exit with whatever status the test needs.
+write_stub() {
+  local name="$1"
+  local body="$2"
+  cat > "$STUB_BIN/$name" <<STUBEOF
+#!/usr/bin/env bash
+$body
+STUBEOF
+  chmod +x "$STUB_BIN/$name"
+}
+
+# A tmux stub good enough for cdev-ensure and cdev-kill tests: reports no
+# session ever exists (so cdev-ensure always proceeds to create one) and
+# succeeds on every other subcommand (new-session, set-environment,
+# kill-session, ...) without starting anything real.
+stub_tmux_no_session() {
+  write_stub tmux '
+case "$1" in
+  has-session) exit 1 ;;
+  *) exit 0 ;;
+esac
+'
+}
