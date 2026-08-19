@@ -21,6 +21,7 @@ teardown() {
 }
 
 @test "doctor reports a newer release and suggests cdev upgrade" {
+  stub_tmux_no_session
   write_stub curl '
 echo "https://github.com/pimlabs/cdev/releases/tag/v9.9.9"
 exit 0
@@ -32,6 +33,7 @@ exit 0
 }
 
 @test "doctor degrades gracefully instead of aborting when GitHub is unreachable" {
+  stub_tmux_no_session
   write_stub curl 'exit 1'
 
   run _cdev-doctor
@@ -47,7 +49,17 @@ exit 0
 @test "doctor reports claude and tmux versions when both are on PATH" {
   write_stub curl 'exit 1'
   write_stub claude 'echo "1.2.3 (Claude Code)"'
-  write_stub tmux 'echo "tmux 3.3a"'
+  # Subcommand-aware rather than a blanket echo: doctor also calls
+  # `tmux list-sessions` now (orphan-session adoption, tested separately in
+  # cdev_doctor_repair.bats), and a stub that echoes "tmux 3.3a" for every
+  # subcommand would feed that as a bogus session name.
+  write_stub tmux '
+case "$1" in
+  -V) echo "tmux 3.3a" ;;
+  list-sessions) exit 1 ;;
+  *) exit 0 ;;
+esac
+'
 
   run _cdev-doctor
   [ "$status" -eq 0 ]

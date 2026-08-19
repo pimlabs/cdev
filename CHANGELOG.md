@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-19
+
+### Added
+
+- `cdev doctor` now adopts a live tmux session that isn't in the registry into the registry, so it survives `cdev restore` after a reboot instead of silently vanishing with no warning beforehand. Account and dir are best-effort guesses, `CDEV_ACCOUNT` from the session's own tmux environment and its current pane path, since an orphan session was never told either explicitly the way `cdev <name>` tells `_cdev-ensure`
+- `cdev doctor` now prints the exact fix command when it finds `cdev-restore.service`, `cdev-healthcheck.timer`, or `loginctl` linger disabled, instead of only naming the problem and leaving the fix to be looked up
+
+### Fixed
+
+- `cdev doctor`'s systemd unit check no longer misreports a disabled-but-installed unit as "not installed". `systemctl is-enabled` exits non-zero for "disabled" just as much as for a unit that was never installed, the exit code alone couldn't tell the two apart, only the actual stdout can
+- `shellcheck.yml` no longer installs shellcheck via `apt-get`. The `ubuntu-latest` runner image already ships shellcheck preinstalled, so the CI job now uses that directly, one less unpinned network call that can stall a run (the exact command that hung for about 4 hours on 19 August 2026, see the `timeout-minutes` fix in 0.3.0) and the job runs faster with the step gone entirely
+
 ## [0.5.0] - 2026-08-19
 
 ### Added
@@ -78,7 +90,8 @@ old `cdev-status`, `cdev-kill`, `cdev-init`, `cdev-accounts`, and
 - `_cdev-ensure`'s dedup check now passes `--` to grep. Without it a registry line starting with a dash was read by grep as its own options, so the check failed and the line was appended again on every call
 - `_cdev-restore` iterates over a snapshot of the registry rather than the live file. Combined with the dedup bug above, reading the file while `_cdev-ensure` appended to it turned the loop into one that never ended and a registry that grew without limit (a real run reached 12,657 identical lines)
 
-[Unreleased]: https://github.com/pimlabs/cdev/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/pimlabs/cdev/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/pimlabs/cdev/releases/tag/v0.6.0
 [0.5.0]: https://github.com/pimlabs/cdev/releases/tag/v0.5.0
 [0.4.0]: https://github.com/pimlabs/cdev/releases/tag/v0.4.0
 [0.3.0]: https://github.com/pimlabs/cdev/releases/tag/v0.3.0

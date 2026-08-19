@@ -152,6 +152,14 @@ About keeping the project easy to work on, not new user-facing behavior.
 
 - [x] Run `shellcheck` in CI on every push/PR (already used ad hoc locally,
       see [CLAUDE.md](CLAUDE.md)).
+- [x] Stopped installing shellcheck via `apt-get` in CI, 19 August 2026,
+      `ubuntu-latest` ships it preinstalled. That `apt-get` step was the
+      exact command that hung for about 4 hours earlier that same day (fixed
+      then with `timeout-minutes`, which stays as a general backstop) and
+      separately the source of a version-drift false positive (SC2015, fixed
+      in 0.3.0). Removing the network call removes both classes of problem
+      at their root instead of only capping the damage, and the job runs
+      faster with no install step at all.
 - [x] Add a `bats-core` test suite for the pieces that don't need a live
       tmux/VPS: registry dedup in `cdev-ensure`, line removal in
       `cdev-kill`, account-to-config-dir mapping.
@@ -278,6 +286,28 @@ tmux `[exited]`.
       child process can't see the calling shell's function table), so this
       is a documented `type cdev` / `unset -f cdev` fix rather than an
       auto-detected one, the same shape as the other two Known issues above.
+
+Curated 19 August 2026, scoped down from an open "should cdev grow a repair
+feature?" question: most of what a `repair` subcommand would fix already
+self-heals through an existing one (`cdev restore` recreates a dead
+registered session, `cdev upgrade` re-applies systemd unit drift), and a
+whole other class, a shadowed shell function, a broken binary, a PATH with no
+`~/.local/bin` on it, can't be repaired by any `cdev` subcommand at all,
+since that is exactly the thing standing between the user and a working
+`cdev` in the first place. What was left after removing both of those
+categories was small enough to fold into `doctor` instead of opening a new
+subcommand.
+
+- [x] `cdev doctor` adopts a live tmux session missing from the registry
+      (started outside `cdev`, or a registry line lost to a manual edit), the
+      one real, previously silent gap: such a session looks fine in `cdev
+      status` right up until the box reboots and it is simply gone.
+- [x] `cdev doctor` prints the exact fix command for a disabled systemd unit
+      or disabled linger, instead of only naming the problem.
+- [x] Fixed `_cdev-doctor-unit` silently misreporting a disabled-but-installed
+      unit as "not installed", found while adding the fix-command line above:
+      `systemctl is-enabled`'s exit code alone can't tell "disabled" from
+      "never installed" apart, only the actual stdout can.
 
 ## Bigger scale (high effort, changes project philosophy)
 

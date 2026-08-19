@@ -150,7 +150,7 @@ or `cdev -- <name>` instead if it needs to be.
 | `cdev kill <name>` | Stop a session and remove it from the reboot registry. |
 | `cdev init <account> <dir>` | One-time interactive login for an account, run inside `<dir>` so the trust dialog applies to that project, not `$HOME`. No-ops if it's already logged in. Runs automatically from `cdev` when needed. |
 | `cdev accounts` | List which `~/.claude*` config dirs (accounts) exist. |
-| `cdev doctor` | Check install health: installed vs repo version, the latest published release, whether the systemd units are enabled/active, and whether linger is on. Points at `cdev upgrade` when the installed version is behind the latest release. |
+| `cdev doctor` | Check install health: installed vs repo version, the latest published release, whether the systemd units are enabled/active, and whether linger is on. Points at `cdev upgrade` when the installed version is behind the latest release, and prints the exact fix command for a disabled unit or disabled linger. Also adopts any live tmux session missing from the registry, so it survives `cdev restore` after a reboot instead of silently vanishing. |
 | `cdev upgrade` | Install the latest tagged release. For a curl-installed box (no checkout to `git pull`): downloads that release's tarball and runs its `install.sh`. No-ops with a message if you're already on the latest tag. |
 | `cdev restore` | Recreate every registered session. Run automatically at boot by `cdev-restore.service`; safe to run by hand too, it no-ops on sessions that already exist. |
 | `cdev healthcheck` | Report registered sessions that vanished from tmux without going through `cdev kill`. Run every 5 minutes by `cdev-healthcheck.timer`; silent unless `~/.cdev-notify` holds a webhook URL. |

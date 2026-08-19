@@ -23,7 +23,14 @@ shellcheck cdev.sh install.sh   # lint
 
 Shellcheck also runs in CI on every push and pull request, see
 `.github/workflows/shellcheck.yml`, in addition to running it ad hoc locally
-as above.
+as above. CI uses whatever shellcheck ships preinstalled on the
+`ubuntu-latest` runner image rather than installing one via `apt-get`, which
+used to be both the source of a real version-drift false positive (SC2015,
+fixed in 0.3.0) and the exact command that hung for about 4 hours on 19
+August 2026. That means CI's shellcheck version can differ from whatever is
+installed locally, since the runner image's version only moves when GitHub
+updates it, not on every run, a rare and documented drift rather than the
+unpredictable one `apt-get` gave.
 
 A bats-core test suite lives under `test/`, covering only the pieces that
 need no live tmux, systemd, or VPS. External commands (`tmux`, `systemctl`,
@@ -50,10 +57,18 @@ bats test/            # needs bats-core installed, it is not vendored here
   and notify file survive, linger is never disabled), and specifically that
   it `return`s rather than `exit`s so the calling shell survives it, the
   failure mode a subcommand risks that a standalone script never could
+- `test/cdev_doctor_release.bats` `_cdev-doctor`'s `Released:` line sourced
+  from `_cdev-latest-tag` (including that GitHub being unreachable degrades
+  that one line instead of aborting the rest of the report), and the
+  `claude`/`tmux` presence and version checks
+- `test/cdev_doctor_repair.bats` the self-heal half of `_cdev-doctor`:
+  adopting a live tmux session that isn't in the registry (and leaving an
+  already-registered one untouched), and the fix command it prints for a
+  disabled systemd unit or disabled linger, distinct from one that was never
+  installed
 
 The suite covers the `cdev()` dispatcher only for flag handling, not for
-subcommand routing. `_cdev-doctor` and `_cdev-status` are not covered at all.
-Those are still hand-verified.
+subcommand routing. `_cdev-status` is not covered at all, still hand-verified.
 
 There is no automated way to exercise the install/reboot flow. Verifying a
 change means reasoning through the script by hand, or running it against a
@@ -139,6 +154,19 @@ prefix.
   VPS test surfaced how confusing their absence looked otherwise (a bare
   tmux `[exited]` pane with no context). A `Running from: $0` line confirms
   the report came from the real installed binary; `_cdev-help` prints usage.
+  `_cdev-doctor` also self-heals two things rather than only reporting them.
+  It adopts any live tmux session missing from the registry (started outside
+  `cdev`, or a registry line lost to a manual edit), the same idempotent
+  append `_cdev-ensure` already does, since such a session looks fine in
+  `cdev status` right up until the box actually reboots and it is simply
+  gone, with no warning beforehand. And it prints the exact fix command for
+  a disabled `cdev-restore.service`, `cdev-healthcheck.timer`, or disabled
+  linger, instead of only naming the problem, which also required fixing
+  `_cdev-doctor-unit`'s presence check: `systemctl is-enabled` exits
+  non-zero for "disabled" just as much as for a unit that was never
+  installed, so the old code, which gated on the exit code alone, silently
+  misreported a disabled-but-installed unit as though cdev had never set it
+  up at all.
 - `_cdev-ensure` creates the tmux session and records it in the registry. It
   is also the one function called non-interactively, so it must stay safe to
   run with no attached terminal (no prompts, no blocking reads), since the
