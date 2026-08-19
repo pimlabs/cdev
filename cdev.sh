@@ -6,7 +6,7 @@
 # systemd units call `cdev restore` and `cdev healthcheck` the same way a
 # human would, after sourcing this file.
 
-CDEV_VERSION="0.2.0"
+CDEV_VERSION="0.3.0"
 CDEV_REGISTRY="$HOME/.cdev-sessions"
 CDEV_REGISTRY_LOCK="$CDEV_REGISTRY.lock"
 CDEV_REPO="${CDEV_REPO:-pimlabs/cdev}"

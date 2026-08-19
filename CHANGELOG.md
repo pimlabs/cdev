@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-19
+
 ### Added
 
 - One-line curl install (`curl -fsSL https://cdev.pimlabs.id/install | bash`, or the GitHub URL directly before the DNS redirect is in place). `install.sh` now runs in two modes: from a checkout it installs as before, and when piped from the network it resolves the latest release tag, downloads that tag's tarball, and hands off to the extracted copy's install.sh
@@ -61,5 +63,6 @@ old `cdev-status`, `cdev-kill`, `cdev-init`, `cdev-accounts`, and
 - `_cdev-ensure`'s dedup check now passes `--` to grep. Without it a registry line starting with a dash was read by grep as its own options, so the check failed and the line was appended again on every call
 - `_cdev-restore` iterates over a snapshot of the registry rather than the live file. Combined with the dedup bug above, reading the file while `_cdev-ensure` appended to it turned the loop into one that never ended and a registry that grew without limit (a real run reached 12,657 identical lines)
 
-[Unreleased]: https://github.com/pimlabs/cdev/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/pimlabs/cdev/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/pimlabs/cdev/releases/tag/v0.3.0
 [0.2.0]: https://github.com/pimlabs/cdev/releases/tag/v0.2.0
