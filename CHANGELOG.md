@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- One-line curl install (`curl -fsSL https://cdev.pimlabs.id/install | bash`, or the GitHub URL directly before the DNS redirect is in place). `install.sh` now runs in two modes: from a checkout it installs as before, and when piped from the network it resolves the latest release tag, downloads that tag's tarball, and hands off to the extracted copy's install.sh
+- `cdev upgrade` subcommand, for installs made via the curl one-liner that have no checkout to `git pull`. Resolves the latest release tag, does nothing if already on it, otherwise downloads and installs that tag
+- `.github/workflows/release.yml` publishes a GitHub Release and attaches install.sh as an asset on every `v*` tag push, which is what makes `releases/latest/download/install.sh` resolve to the newest release
+
+### Changed
+
+- `cdev doctor` now also reports the latest published release tag on GitHub, alongside the existing `$PWD` checkout comparison. Its only version check before this was against a `cdev.sh` in `$PWD`, which a curl install never has, so doctor silently skipped that check and read as up to date with no way to tell otherwise
+
 ## [0.2.0] - 2026-08-19
 
 First tagged release. Everything below was written before any version

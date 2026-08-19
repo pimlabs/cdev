@@ -16,24 +16,65 @@ sudo apt install -y tmux
 ## Install
 
 ```bash
+curl -fsSL https://cdev.pimlabs.id/install | bash
+source ~/.cdev.sh
+```
+
+That is the one-line install, the same shape as Bun, rustup, or Docker's.
+`cdev.pimlabs.id/install` is a permanent redirect to
+`https://github.com/pimlabs/cdev/releases/latest/download/install.sh`, which
+works today on its own if the redirect isn't live yet or you'd rather not
+depend on the subdomain:
+
+```bash
+curl -fsSL https://github.com/pimlabs/cdev/releases/latest/download/install.sh | bash
+source ~/.cdev.sh
+```
+
+It needs `curl` and `tar` on the box, and it always installs the latest
+tagged release, never a branch. The script detects it's running from a pipe
+rather than a checkout, downloads that release's tarball, and hands off to
+the `install.sh` inside it, so the rest of the install (below) is identical
+either way.
+
+If you're developing on cdev itself, or you'd rather read the script before
+running it, clone and run it from a checkout instead:
+
+```bash
 git clone https://github.com/pimlabs/cdev.git
 cd cdev
 ./install.sh
 source ~/.cdev.sh
 ```
 
-`install.sh` copies `cdev.sh` to `~/.cdev.sh`, detects whether the login
-shell is zsh or bash and sources it from the matching rc file (`~/.zshrc` or
-`~/.bashrc`), and installs three `systemd --user` units. Everything, the
-interactive commands, the boot-time restore, and the health check, lives in
-that one `cdev.sh`, dispatched through `cdev restore` and `cdev healthcheck`
-the same way a human would call `cdev status`. It enables
+Either way, `install.sh` copies `cdev.sh` to `~/.cdev.sh`, detects whether
+the login shell is zsh or bash and sources it from the matching rc file
+(`~/.zshrc` or `~/.bashrc`), and installs three `systemd --user` units.
+Everything, the interactive commands, the boot-time restore, and the health
+check, lives in that one `cdev.sh`, dispatched through `cdev restore` and
+`cdev healthcheck` the same way a human would call `cdev status`. It enables
 `cdev-restore.service`, which recreates every registered session
 automatically after a reboot with no manual step, and
 `cdev-healthcheck.timer`, which drives `cdev-healthcheck.service` on a 5
 minute interval (that one stays silent until you opt in, see below). It also
 runs `sudo loginctl enable-linger` so those units can start before any
 interactive login.
+
+### Upgrading
+
+An install made with the curl one-liner has no checkout to `git pull`, so
+`cdev upgrade` is how it moves forward: it downloads the latest release's
+tarball and runs its `install.sh` the same way the one-liner did. A checkout
+install upgrades the ordinary way instead:
+
+```bash
+git pull
+./install.sh
+```
+
+Either path only updates `~/.cdev.sh` and the systemd units, your current
+shell keeps the old functions loaded until you open a new one or re-source
+`~/.cdev.sh`.
 
 ## Uninstall
 
@@ -73,16 +114,17 @@ creating) a project session.
 | `cdev kill <name>` | Stop a session and remove it from the reboot registry. |
 | `cdev init <account> <dir>` | One-time interactive login for an account, run inside `<dir>` so the trust dialog applies to that project, not `$HOME`. No-ops if it's already logged in. Runs automatically from `cdev` when needed. |
 | `cdev accounts` | List which `~/.claude*` config dirs (accounts) exist. |
-| `cdev doctor` | Check install health: installed vs repo version, whether the systemd units are enabled/active, and whether linger is on. |
+| `cdev doctor` | Check install health: installed vs repo version, the latest published release, whether the systemd units are enabled/active, and whether linger is on. Points at `cdev upgrade` when the installed version is behind the latest release. |
+| `cdev upgrade` | Install the latest tagged release. For a curl-installed box (no checkout to `git pull`): downloads that release's tarball and runs its `install.sh`. No-ops with a message if you're already on the latest tag. |
 | `cdev restore` | Recreate every registered session. Run automatically at boot by `cdev-restore.service`; safe to run by hand too, it no-ops on sessions that already exist. |
 | `cdev healthcheck` | Report registered sessions that vanished from tmux without going through `cdev kill`. Run every 5 minutes by `cdev-healthcheck.timer`; silent unless `~/.cdev-notify` holds a webhook URL. |
 | `cdev version` (`--version`, `-v`) | Print the installed cdev version. |
 | `cdev help` (`--help`, `-h`) | Show usage and the subcommand list. Also what bare `cdev` prints. |
 
 A project name can't collide with a subcommand word (`status`, `kill`, `init`,
-`accounts`, `doctor`, `restore`, `healthcheck`, `version`, `help`), the same
-convention `git` and `npm` use. If it does, force attach mode with
-`cdev -- <name> [account] [dir]`.
+`accounts`, `doctor`, `upgrade`, `restore`, `healthcheck`, `version`,
+`help`), the same convention `git` and `npm` use. If it does, force attach
+mode with `cdev -- <name> [account] [dir]`.
 
 Must run inside `tmux` (which `cdev` handles for you), not a bare SSH shell,
 or the session dies the moment SSH disconnects. The first time `cdev` is

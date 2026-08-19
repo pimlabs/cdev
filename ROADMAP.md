@@ -109,35 +109,36 @@ About keeping the project easy to work on, not new user-facing behavior.
 - [x] Surfacing a stale install is covered by `cdev doctor` in the
       single-entrypoint track above, superseded there.
 
-## Distribution: one-line install (medium effort, design agreed)
+## Distribution: one-line install (shipped)
 
-Curated 19 August 2026. Installing today means `git clone` first, which
-means a fresh VPS needs `git` before it can install a tool that otherwise
-only needs `tmux` and `curl`. The target is the pattern rustup, Homebrew,
-Bun, Deno, uv, Docker, Tailscale, and k3s all use:
+Curated 19 August 2026. Installing before this meant `git clone` first,
+which meant a fresh VPS needed `git` before it could install a tool that
+otherwise only needs `tmux` and `curl`. The target was the pattern rustup,
+Homebrew, Bun, Deno, uv, Docker, Tailscale, and k3s all use:
 
 ```
 curl -fsSL https://cdev.pimlabs.id/install | bash
 ```
 
-The last three are the relevant precedent: they also need root and also
+The last three were the relevant precedent: they also need root and also
 install system services, so the fact that `install.sh` runs `sudo loginctl
-enable-linger` is not a reason to avoid this.
+enable-linger` was not a reason to avoid this.
 
-- [ ] Make `install.sh` work in two modes. It currently copies its sibling
-      files via `$SCRIPT_DIR`, which does not exist when the script is piped
-      into bash. Piped, it should download the release tarball and install
-      from that; from a checkout it should keep working exactly as now.
-- [ ] Attach `install.sh` as a release asset, so
+- [x] Make `install.sh` work in two modes. It used to copy its sibling
+      files via `$SCRIPT_DIR`, which does not exist when the script is
+      piped into bash. Piped, it downloads the release tarball and installs
+      from that; from a checkout it keeps working exactly as before.
+- [x] Attach `install.sh` as a release asset, so
       `github.com/pimlabs/cdev/releases/latest/download/install.sh` always
       resolves to the newest release. That is what makes the front door a
       one-time setup instead of something to update on every tag.
-- [ ] Add `cdev upgrade`. Without a checkout there is no `git pull`, so
-      there has to be a supported way to move to a newer version.
-- [ ] Change `_cdev-doctor`'s version comparison to check the latest release
-      tag on GitHub rather than a `cdev.sh` in `$PWD`. This is the part that
-      silently breaks otherwise: with no checkout the current comparison is
-      skipped and doctor reports nothing at all, which reads as "up to date".
+- [x] Add `cdev upgrade`. Without a checkout there is no `git pull`, so
+      there is now a supported way to move to a newer version.
+- [x] Change `_cdev-doctor`'s version comparison to check the latest release
+      tag on GitHub rather than only a `cdev.sh` in `$PWD`. This closes the
+      part that used to silently break: with no checkout the old comparison
+      was skipped and doctor reported nothing at all, which read as "up to
+      date".
 
 Two constraints worth writing down. The URL must resolve to a tagged
 release, never to `main`, since piping a moving branch into a shell with
@@ -145,6 +146,13 @@ sudo access is a far bigger ask than piping a fixed one. And the DNS
 redirect from `cdev.pimlabs.id` to the GitHub URL is not a blocker: the
 installer works through the GitHub URL from day one, and the subdomain is
 a nicer front door that can be pointed at it whenever.
+
+One piece remains, and it is not code: pointing `cdev.pimlabs.id` at the
+GitHub URL is a DNS record the user still has to set up, outside this repo.
+Until then, `curl -fsSL https://github.com/pimlabs/cdev/releases/latest/download/install.sh | bash`
+is the working one-liner. Also worth knowing: the existing `v0.2.0` tag was
+pushed before the release workflow existed, so it has no release asset.
+The one-liner starts working from the next tagged release onward.
 
 ## Bigger scale (high effort, changes project philosophy)
 

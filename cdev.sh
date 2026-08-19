@@ -8,6 +8,7 @@
 
 CDEV_VERSION="0.2.0"
 CDEV_REGISTRY="$HOME/.cdev-sessions"
+CDEV_REPO="${CDEV_REPO:-pimlabs/cdev}"
 
 # Map an account to its CLAUDE_CONFIG_DIR. 'personal' uses ~/.claude, any
 # other account uses ~/.claude-<account>. One helper so _cdev-ensure,
@@ -267,6 +268,82 @@ _cdev-healthcheck() {
   done < "$CDEV_REGISTRY"
 }
 
+# Resolve the newest release tag by following the redirect that
+# /releases/latest issues to /releases/tag/<tag>. No JSON to parse without
+# jq, and no unauthenticated API rate limit to hit. install.sh carries its
+# own copy of this: it has to run before cdev.sh is installed, so the two
+# cannot share it.
+_cdev-latest-tag() {
+  command -v curl >/dev/null 2>&1 || return 1
+  local url tag
+  url=$(curl -fsSL --connect-timeout 3 --max-time 10 -o /dev/null \
+    -w '%{url_effective}' "https://github.com/$CDEV_REPO/releases/latest") || return 1
+  tag="${url##*/tag/}"
+  case "$tag" in
+    v[0-9]*.[0-9]*.[0-9]*) printf '%s\n' "$tag" ;;
+    *) return 1 ;;
+  esac
+}
+
+# Move this box to the latest release. Exists because an install made with
+# `curl ... | bash` has no checkout, so there is no `git pull` to run.
+_cdev-upgrade() {
+  for cmd in curl tar; do
+    command -v "$cmd" >/dev/null 2>&1 || {
+      echo "cdev upgrade: $cmd is required." >&2
+      return 1
+    }
+  done
+
+  local tag
+  tag=$(_cdev-latest-tag) || {
+    echo "cdev upgrade: could not reach GitHub to check for a release." >&2
+    return 1
+  }
+
+  if [ "$tag" = "v$CDEV_VERSION" ]; then
+    echo "Already on the latest release (cdev $CDEV_VERSION)."
+    return 0
+  fi
+
+  # Deliberately not deciding which of the two is newer. Comparing version
+  # strings portably is more machinery than it is worth here, and "install
+  # what the project currently publishes" is a defensible answer either way,
+  # so the versions are printed and the user can stop if that is not what
+  # they wanted.
+  echo "Installed: cdev $CDEV_VERSION"
+  echo "Latest release: $tag"
+  echo "Installing $tag..."
+
+  local work
+  work=$(mktemp -d) || return 1
+
+  if ! curl -fsSL --connect-timeout 5 --max-time 120 \
+    "https://github.com/$CDEV_REPO/archive/refs/tags/$tag.tar.gz" |
+    tar -xz -C "$work" --strip-components=1; then
+    echo "cdev upgrade: could not download or unpack $tag." >&2
+    rm -rf "$work"
+    return 1
+  fi
+
+  if [ ! -f "$work/install.sh" ]; then
+    echo "cdev upgrade: the $tag tarball has no install.sh." >&2
+    rm -rf "$work"
+    return 1
+  fi
+
+  ( cd "$work" && bash ./install.sh )
+  local status=$?
+  rm -rf "$work"
+
+  if [ "$status" -eq 0 ]; then
+    echo ""
+    echo "Upgraded. This shell still holds the old functions, open a new one"
+    echo "or run 'source ~/.cdev.sh' to pick up $tag."
+  fi
+  return "$status"
+}
+
 # Print one line of _cdev-doctor's systemd unit report for $1, given that
 # systemctl is already known to exist. `is-active` exits non-zero for a unit
 # that is merely inactive, so it gets `|| true`: the word it prints is the
@@ -288,6 +365,10 @@ _cdev-doctor-unit() {
 _cdev-doctor() {
   echo "Installed: cdev $CDEV_VERSION (~/.cdev.sh)"
 
+  # The $PWD comparison only ever helps someone developing in a checkout,
+  # and it is skipped silently everywhere else. An install made with
+  # `curl ... | bash` has no checkout at all, so the released version has to
+  # come from GitHub or doctor would report nothing and read as up to date.
   if [ -f "./cdev.sh" ]; then
     local repo_version
     repo_version=$(grep '^CDEV_VERSION=' "./cdev.sh" | head -n1 | sed -E 's/CDEV_VERSION="?([^"]*)"?/\1/')
@@ -297,6 +378,18 @@ _cdev-doctor() {
         echo "Versions differ, run ./install.sh again to update."
       fi
     fi
+  fi
+
+  local latest
+  if latest=$(_cdev-latest-tag); then
+    echo "Released:  cdev ${latest#v}"
+    if [ "$latest" != "v$CDEV_VERSION" ]; then
+      echo "A different version is published, run 'cdev upgrade' to move to $latest."
+    fi
+  else
+    # Offline, no curl, or no releases yet. Not a fault worth an error, but
+    # not something to leave looking like a clean bill of health either.
+    echo "Released:  could not check (no network, no curl, or no release yet)"
   fi
 
   echo ""
@@ -348,6 +441,9 @@ Subcommands:
                            account.
   accounts                 List configured account config directories.
   doctor                   Show install version and systemd/linger health.
+  upgrade                  Install the latest release. For installs made with
+                           the one-line curl command, which have no checkout
+                           to git pull.
   restore                  Recreate every registered session. Run at boot by
                            cdev-restore.service, safe to run by hand.
   healthcheck              Report registered sessions that vanished from tmux.
@@ -387,6 +483,10 @@ cdev() {
     doctor)
       shift
       _cdev-doctor "$@"
+      ;;
+    upgrade)
+      shift
+      _cdev-upgrade "$@"
       ;;
     restore)
       shift

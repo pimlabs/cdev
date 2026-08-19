@@ -63,13 +63,14 @@ past the session.
 Everything lives in one file, `cdev.sh` (sourced into `~/.bashrc` at install
 time). `cdev()` is the dispatcher and the only function meant to be called
 directly, the sole public entrypoint: it routes `cdev status`, `cdev kill`,
-`cdev init`, `cdev accounts`, `cdev doctor`, `cdev restore`,
+`cdev init`, `cdev accounts`, `cdev doctor`, `cdev upgrade`, `cdev restore`,
 `cdev healthcheck`, `cdev version`, and `cdev help` to underscore-prefixed
 internal functions (`_cdev-status`, `_cdev-kill`, `_cdev-init`,
-`_cdev-accounts`, `_cdev-doctor`, `_cdev-doctor-unit`, `_cdev-restore`,
-`_cdev-healthcheck`, `_cdev-help`, `_cdev-format-duration`,
-`_cdev-config-dir`, `_cdev-ensure`), and falls through to `_cdev-attach` for
-anything else, so `cdev <name> [account] [dir]` still works exactly as the
+`_cdev-accounts`, `_cdev-doctor`, `_cdev-doctor-unit`, `_cdev-upgrade`,
+`_cdev-latest-tag`, `_cdev-restore`, `_cdev-healthcheck`, `_cdev-help`,
+`_cdev-format-duration`, `_cdev-config-dir`, `_cdev-ensure`), and falls
+through to `_cdev-attach` for anything else, so `cdev <name> [account] [dir]`
+still works exactly as the
 old top-level `cdev` function did. The leading underscore marks every one of
 these as implementation detail, not a supported interface, so nothing outside
 `cdev.sh` itself should call them by name. There is no exception any more:
@@ -77,10 +78,38 @@ these as implementation detail, not a supported interface, so nothing outside
 
 - `_cdev-attach` holds the login-then-ensure-then-tmux-attach logic that used
   to live directly in `cdev`.
+- `_cdev-latest-tag` resolves the newest published release by following the
+  redirect that GitHub's `/releases/latest` issues to `/releases/tag/<tag>`,
+  read with `curl -o /dev/null -w '%{url_effective}'`, then validates the
+  result against the glob `v[0-9]*.[0-9]*.[0-9]*`. Deliberately not the
+  GitHub API: no JSON to parse without `jq`, and no unauthenticated rate
+  limit to hit. A repo with no releases redirects somewhere with no `/tag/`
+  in it, which the glob rejects. `install.sh` carries its own copy of this
+  logic, `cdev_latest_tag`, because it has to run before `cdev.sh` is on the
+  box at all, so the two cannot share code.
+- `_cdev-upgrade` moves an installed box to the latest release. It exists
+  because an install made with the one-line `curl | bash` command has no
+  checkout, so there is no `git pull`. It resolves the latest tag, prints
+  "Already on the latest release" and stops if it matches `v$CDEV_VERSION`,
+  otherwise downloads that tag's tarball and runs its `install.sh`. It
+  deliberately does not decide which version is newer, comparing version
+  strings portably is more machinery than it is worth, so it prints both and
+  installs what the project currently publishes. Afterwards it reminds the
+  user that their current shell still holds the old functions until they
+  open a new one or re-source `~/.cdev.sh`.
 - `_cdev-doctor` reports the installed version, systemd unit state, and
   linger state, guarding every `systemctl`/`loginctl` call so a box without
   systemd reports that fact instead of crashing or claiming the units are
-  missing; `_cdev-help` prints usage.
+  missing. It now also calls `_cdev-latest-tag` and prints the published
+  version, suggesting `cdev upgrade` when it differs from the installed one.
+  This is the check that actually reaches every install: the older `$PWD`
+  comparison below is a developer convenience, useful only inside a
+  checkout, and it is skipped silently everywhere else, which for a
+  `curl | bash` install is always. Silence there used to read as "up to
+  date", which is the bug the GitHub check fixes. When GitHub is
+  unreachable, `curl` is missing, or there is no release yet, doctor prints
+  "Released: could not check (no network, no curl, or no release yet)"
+  rather than aborting or staying silent; `_cdev-help` prints usage.
 - `_cdev-ensure` creates the tmux session and records it in the registry. It
   is also the one function called non-interactively, so it must stay safe to
   run with no attached terminal (no prompts, no blocking reads), since the
@@ -124,7 +153,27 @@ in the file and gets recreated on the next `cdev restore`, or flagged by
 sourced `~/.cdev.sh`) against the version in whatever `cdev.sh` sits in
 `$PWD`, when run from inside this repo's checkout. That comparison is
 best-effort: it is skipped entirely when no `cdev.sh` is found in the
-current directory.
+current directory, which is exactly why the GitHub-backed "Released:" check
+described above exists, it is the check that still fires when there is no
+checkout at all.
+
+`install.sh` runs in two modes, decided by whether its own payload sits next
+to it. `CDEV_PAYLOAD` names the files install.sh needs beside it (`cdev.sh`
+and the three systemd unit files). From a checkout those files are there, and
+install.sh installs exactly as before. Piped straight from the network, as in
+`curl -fsSL https://cdev.pimlabs.id/install | bash`, there is no sibling file
+at all, so install.sh resolves the newest release tag with the same
+redirect-following logic as `_cdev-latest-tag` above (its own copy, named
+`cdev_latest_tag`), downloads that tag's tarball from GitHub, extracts it to
+a temp directory with `--strip-components=1`, and hands over with
+`CDEV_BOOTSTRAPPED=1 exec bash "$work/install.sh"`. The mode decision looks
+for the payload files rather than inspecting `$0` or `BASH_SOURCE`,
+deliberately: a payload check reads the same however the script was invoked,
+and it is what stops the hand-off from looping, since the extracted copy
+does find its own payload and installs on that pass instead of downloading
+again. `CDEV_BOOTSTRAPPED` is the second, belt-and-braces guard against the
+same loop. Piped installs require `curl` and `tar` and say so clearly if
+either is missing.
 
 ## Releasing
 
@@ -141,6 +190,17 @@ install is stale without telling them what changed.
 3. Commit, then `git tag -a vX.Y.Z` with a message summarising the release.
 4. `git push origin main --follow-tags`, which pushes the commit and the tag
    in one go. A plain `git push` leaves the tag behind on the laptop.
+
+Pushing the tag is enough to publish the release itself. `.github/workflows/release.yml`
+watches for `v*` tag pushes and publishes the GitHub Release, attaching
+`install.sh` as an asset, automatically, so this is not a step a maintainer
+does by hand. That asset is what makes `/releases/latest/download/install.sh`
+resolve, which is the documented one-line install URL. If that workflow ever
+stops attaching the asset, the advertised one-liner 404s for everyone while
+the release itself still looks perfectly fine, nothing else in the release
+process would catch it. The existing `v0.2.0` tag was pushed before this
+workflow existed, so it has no Release object and no asset; the one-line
+install only starts working from the next tagged release onward.
 
 Pre-1.0, so a breaking change bumps the minor, not the major. Renaming or
 removing anything a user types (a subcommand, a flag) or anything an

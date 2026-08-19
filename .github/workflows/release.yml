@@ -1,0 +1,41 @@
+name: release
+
+# Publishes the GitHub Release for a tag and attaches install.sh to it.
+#
+# The attachment is what makes the advertised one-line install work:
+# /releases/latest/download/install.sh only resolves if install.sh is an
+# asset of the newest release. Automated rather than left as a release-day
+# step on purpose, since forgetting it does not break the release, it breaks
+# the install URL for everyone, and nothing about the release itself looks
+# wrong when that happens.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish release and attach install.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # Re-running on an existing release replaces the asset rather
+            # than failing, so a re-run of this job is harmless.
+            gh release upload "$TAG" install.sh --clobber
+          else
+            gh release create "$TAG" \
+              --title "cdev $TAG" \
+              --notes "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/CHANGELOG.md) for what changed." \
+              install.sh
+          fi
