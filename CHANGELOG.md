@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `cdev` is now installed as a plain executable at `~/.local/bin/cdev` instead of being copied to `~/.cdev.sh` and sourced into `~/.bashrc`/`~/.zshrc`. The old model meant the shell that just ran the installer never had `cdev` available, only shells that sourced the rc file after install did, so every install ended with a manual `source ~/.cdev.sh` or a new shell. A `$PATH`-resolved executable needs no such step: the next `cdev` typed, in the same shell that ran the installer, already works, `~/.local/bin` is on `PATH` by default on stock Ubuntu. If it isn't, `install.sh` now falls back to appending `export PATH="$HOME/.local/bin:$PATH"` to the detected rc file instead. Upgrading an existing install is automatic and transparent: `install.sh` (which `cdev upgrade` re-runs) removes the old `~/.cdev.sh` and strips the legacy `source` line from both rc files if present, and `cdev uninstall` now removes the `~/.local/bin/cdev` binary as its primary target, keeping the rc-file cleanup only as a fallback for a box still on the old model
+- `cdev upgrade` no longer tells you to open a new shell or re-source anything afterward. That instruction was a symptom of the sourced-function model: replacing `~/.cdev.sh` on disk did nothing to a shell that had already loaded the old function definitions into memory. With a binary, the very next `cdev` invocation, in any shell, already runs the newly-installed content at that same path
+- `cdev-restore.service` and `cdev-healthcheck.service` now call `~/.local/bin/cdev` directly by its absolute path (`ExecStart=%h/.local/bin/cdev restore`, and `... healthcheck`), instead of `/bin/bash -c "source %h/.cdev.sh && cdev ..."`. Behavior is unchanged, this is strictly simpler now that there is a real executable to point at
+
 ## [0.3.0] - 2026-08-19
 
 ### Added

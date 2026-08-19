@@ -162,13 +162,24 @@ if [ "$have_payload" -eq 0 ]; then
   CDEV_BOOTSTRAPPED=1 exec bash "$work/install.sh" "$@"
 fi
 
-cp "$SCRIPT_DIR/cdev.sh" "$HOME/.cdev.sh"
+# cdev is a plain executable on $PATH now, not a function sourced into the
+# shell rc file. A sourced function only exists in shells that source the rc
+# file *after* install, so the very shell that just ran this installer never
+# had it, that friction is what a $PATH-resolved binary avoids structurally:
+# once ~/.local/bin/cdev exists and ~/.local/bin is on PATH, the next `cdev`
+# typed in ANY shell, including this one, finds it, no source and no new
+# shell required.
+mkdir -p "$HOME/.local/bin"
+cp "$SCRIPT_DIR/cdev.sh" "$HOME/.local/bin/cdev"
+chmod +x "$HOME/.local/bin/cdev"
 
-# Older installs had the boot and health-check halves as their own copied
-# dotfiles. Both are now `cdev restore` / `cdev healthcheck` subcommands
-# inside .cdev.sh, and the systemd units below no longer point at them, so
-# clear the leftovers rather than leaving dead scripts in $HOME.
-rm -f "$HOME/.cdev-restore-all.sh" "$HOME/.cdev-healthcheck.sh"
+# Migration cleanup for anyone upgrading from the old sourced-function model.
+# `cdev upgrade` re-runs this script, so a real installed box can hit this
+# path, not just a hypothetical one. Older installs also had the boot and
+# health-check halves as their own copied dotfiles, predating even the
+# sourced-function model; clear all of it rather than leaving dead files and
+# a dangling `source` line behind.
+rm -f "$HOME/.cdev.sh" "$HOME/.cdev-restore-all.sh" "$HOME/.cdev-healthcheck.sh"
 
 SHELL_NAME="$(basename "${SHELL:-}")"
 if [ "$SHELL_NAME" = "zsh" ]; then
@@ -178,16 +189,44 @@ else
 fi
 echo "Detected shell: $SHELL_NAME"
 
-# Create the rc file first if it isn't there. The append below would create
-# it anyway, but the grep in front of it would print its own "No such file
-# or directory" on a fresh box, which reads like the install failed.
-touch "$RC_FILE"
-
 # The single quotes are deliberate: the literal string $HOME has to land in
 # the rc file so it resolves at shell startup, not install time.
 # shellcheck disable=SC2016
-grep -qxF 'source "$HOME/.cdev.sh"' "$RC_FILE" || echo 'source "$HOME/.cdev.sh"' >> "$RC_FILE"
-echo "Added 'source \"\$HOME/.cdev.sh\"' to $RC_FILE"
+old_source_line='source "$HOME/.cdev.sh"'
+for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+  [ -f "$rc" ] || continue
+  grep -qxF -- "$old_source_line" "$rc" || continue
+  grep_status=0
+  grep -vxF -- "$old_source_line" "$rc" > "$rc.cdev-tmp" || grep_status=$?
+  if [ "$grep_status" -le 1 ]; then
+    mv "$rc.cdev-tmp" "$rc"
+  else
+    rm -f "$rc.cdev-tmp"
+  fi
+done
+
+# Ensure ~/.local/bin is actually on PATH for future shells. Stock Ubuntu
+# already puts it there via ~/.profile, the common case this project
+# targets, so this is a fallback rather than the main mechanism.
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) on_path=1 ;;
+  *) on_path=0 ;;
+esac
+
+added_path_line=0
+if [ "$on_path" -eq 0 ]; then
+  # Create the rc file first if it isn't there. The append below would
+  # create it anyway, but the grep in front of it would print its own
+  # "No such file or directory" on a fresh box, which reads like the
+  # install failed.
+  touch "$RC_FILE"
+  # Single quotes deliberate here too: the literal string $HOME and $PATH
+  # must land in the rc file so they resolve at shell startup.
+  # shellcheck disable=SC2016
+  path_line='export PATH="$HOME/.local/bin:$PATH"'
+  grep -qxF -- "$path_line" "$RC_FILE" || echo "$path_line" >> "$RC_FILE"
+  added_path_line=1
+fi
 
 mkdir -p "$HOME/.config/systemd/user"
 cp "$SCRIPT_DIR/cdev-restore.service" "$HOME/.config/systemd/user/cdev-restore.service"
@@ -199,7 +238,12 @@ systemctl --user daemon-reload
 systemctl --user enable cdev-restore.service
 systemctl --user enable --now cdev-healthcheck.timer
 
-echo "Installed."
-echo "Run 'source $RC_FILE' (or start a new shell) to use cdev right away."
+if [ "$added_path_line" -eq 1 ]; then
+  echo "Installed."
+  echo "Added ~/.local/bin to PATH in $RC_FILE (it wasn't there before)."
+  echo "Run 'source $RC_FILE' (or start a new shell) once to pick that up, then cdev is ready."
+else
+  echo "Installed. cdev is ready, run 'cdev help' to get started."
+fi
 echo "From now on, any session started with cdev survives a VPS reboot automatically."
 echo "cdev-healthcheck.timer is now enabled and will periodically check session health."

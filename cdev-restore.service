@@ -5,9 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-# systemd does not read the shell rc file, so cdev has to be sourced before
-# it can be called. Same entrypoint a human uses, no separate script.
-ExecStart=/bin/bash -c "source %h/.cdev.sh && cdev restore"
+# cdev is a plain executable at %h/.local/bin/cdev, so this needs no shell
+# wrapper, no PATH lookup, and no login shell to source anything from.
+# Same entrypoint a human uses (`cdev restore`), just invoked non-interactively
+# by its absolute path.
+ExecStart=%h/.local/bin/cdev restore
 RemainAfterExit=yes
 
 [Install]

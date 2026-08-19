@@ -208,6 +208,54 @@ track above added checksum verification to this download: both the piped
 install and `cdev upgrade` now check the tarball against a `SHA256SUMS`
 release asset before extracting it.
 
+A second 19 August 2026 pass, discovered live during an actual VPS install
+attempt, replaced the sourced-function model entirely. `install.sh` used to
+copy `cdev.sh` to `~/.cdev.sh` and append `source "$HOME/.cdev.sh"` to
+`~/.bashrc` or `~/.zshrc`. A shell function only becomes callable in shells
+that source the rc file *after* install, so the very shell that had just run
+the installer never got `cdev`, a child process can never inject a function
+into its parent shell. Every install ended with "now run `source
+~/.cdev.sh` or open a new shell," which read as non-standard friction, even
+though rustup, nvm, and Bun have the identical limitation for the identical
+reason.
+
+- [x] Install `cdev` as a plain executable at `~/.local/bin/cdev`
+      (`chmod +x`, the same `#!/usr/bin/env bash` shebang `cdev.sh` already
+      had) instead of copying it to a dotfile and sourcing it. `~/.local/bin`
+      is on `PATH` by default on stock Ubuntu, the common target here, so a
+      command resolved off `PATH` needs no loading step the way a shell
+      function does, it is looked up fresh (or from bash's per-session path
+      hash, keyed by path, not content) on every invocation. The next `cdev`
+      typed, in the same shell that just ran the installer, already finds it.
+- [x] Fall back to appending `export PATH="$HOME/.local/bin:$PATH"` to the
+      detected shell rc file when `~/.local/bin` isn't already on `PATH`,
+      idempotently, only in that case, so the common case (already on
+      `PATH`) gets no rc-file edit and no restart instruction at all.
+- [x] Migrate a box installed under the old model automatically: `install.sh`
+      (which `cdev upgrade` re-runs) now removes `~/.cdev.sh` and strips the
+      legacy `source` line from both rc files if present, so an upgrade
+      leaves nothing dangling behind.
+- [x] Point `cdev-restore.service` and `cdev-healthcheck.service` at the
+      binary's absolute path (`%h/.local/bin/cdev restore` /
+      `... healthcheck`) directly, dropping the `/bin/bash -c "source
+      %h/.cdev.sh && cdev ..."` wrapper the sourced-function model needed.
+      systemd never read the shell rc file anyway, so this was always a
+      workaround for `cdev` not existing as a callable command yet, and a
+      `$PATH`-resolved binary makes the workaround unnecessary rather than
+      fixing it in place.
+- [x] Update `_cdev-uninstall` to remove the binary as the primary target,
+      keeping the rc-file line stripping only as a migration safety net for
+      a box still carrying leftovers from the old model.
+
+One bonus fell out of this for free rather than needing its own work:
+`cdev upgrade` used to leave the current shell running the old, already-
+loaded function definitions until it was re-sourced or a new shell opened,
+since replacing `~/.cdev.sh` on disk does nothing to a shell that already
+parsed the old copy into memory. With a binary, the very next `cdev`
+invocation in the same shell already runs the newly-installed content at
+that same path, same file, new bytes, no separate reload step, and no
+staleness window is possible.
+
 ## Bigger scale (high effort, changes project philosophy)
 
 This moves cdev from a small, predictable single-box tool toward a small

@@ -96,7 +96,8 @@ exit 1
 
   [ ! -f "$CURL_LOG" ]
 
-  [ -f "$TEST_HOME/.cdev.sh" ]
+  [ -f "$TEST_HOME/.local/bin/cdev" ]
+  [ -x "$TEST_HOME/.local/bin/cdev" ]
   [ -f "$TEST_HOME/.config/systemd/user/cdev-restore.service" ]
   [ -f "$TEST_HOME/.config/systemd/user/cdev-healthcheck.service" ]
   [ -f "$TEST_HOME/.config/systemd/user/cdev-healthcheck.timer" ]
@@ -137,7 +138,8 @@ exit 1
   [[ "$output" == *"Checksum OK."* ]]
   [[ "$output" == *"Installing v9.9.9..."* ]]
 
-  [ -f "$TEST_HOME/.cdev.sh" ]
+  [ -f "$TEST_HOME/.local/bin/cdev" ]
+  [ -x "$TEST_HOME/.local/bin/cdev" ]
   [ -f "$TEST_HOME/.config/systemd/user/cdev-restore.service" ]
   [ -f "$TEST_HOME/.config/systemd/user/cdev-healthcheck.service" ]
   [ -f "$TEST_HOME/.config/systemd/user/cdev-healthcheck.timer" ]
@@ -171,7 +173,7 @@ exit 1
   [[ "$output" == *"checksum mismatch"* ]]
 
   # Nothing from the (untrusted) tarball should have been installed.
-  [ ! -f "$TEST_HOME/.cdev.sh" ]
+  [ ! -f "$TEST_HOME/.local/bin/cdev" ]
   [ ! -f "$TEST_HOME/.config/systemd/user/cdev-restore.service" ]
 }
 
@@ -198,7 +200,7 @@ exit 1
   [ "$status" -ne 0 ]
   [[ "$output" == *"could not download SHA256SUMS"* ]]
 
-  [ ! -f "$TEST_HOME/.cdev.sh" ]
+  [ ! -f "$TEST_HOME/.local/bin/cdev" ]
 }
 
 @test "standalone/piped mode aborts when SHA256SUMS has no entry for source.tar.gz" {
@@ -236,5 +238,5 @@ exit 1
   [ "$status" -ne 0 ]
   [[ "$output" == *"has no entry for source.tar.gz"* ]]
 
-  [ ! -f "$TEST_HOME/.cdev.sh" ]
+  [ ! -f "$TEST_HOME/.local/bin/cdev" ]
 }

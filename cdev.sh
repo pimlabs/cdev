@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Persistent, multi-account Claude Code sessions on this VPS.
-# Sourced from the shell rc file at install time. Single entrypoint: `cdev
-# <subcommand> ...` dispatches to the underscore-prefixed functions below,
-# which are implementation detail and not meant to be called directly. The
-# systemd units call `cdev restore` and `cdev healthcheck` the same way a
-# human would, after sourcing this file.
+# Installed as a plain executable at ~/.local/bin/cdev, not sourced into a
+# shell rc file. Single entrypoint: `cdev <subcommand> ...` dispatches to the
+# underscore-prefixed functions below, which are implementation detail and
+# not meant to be called directly. The systemd units call `cdev restore` and
+# `cdev healthcheck` the same way a human would, by the binary's absolute
+# path (%h/.local/bin/cdev).
 
 CDEV_VERSION="0.3.0"
 CDEV_REGISTRY="$HOME/.cdev-sessions"
@@ -161,12 +162,17 @@ _cdev-attach() {
   tmux attach -t "$name"
 }
 
-# List the per-account config dirs that exist. Uses find rather than a glob
-# on purpose: install.sh now sources this file from ~/.zshrc for zsh users,
-# and under zsh's default nomatch an unmatched .claude-* glob aborts the
-# command with "no matches found" instead of expanding to nothing, so a box
-# with only ~/.claude and no other account would print an error and list
-# nothing.
+# List the per-account config dirs that exist. Uses find rather than a glob.
+# This used to matter for a real reason: when install.sh sourced this file
+# from ~/.zshrc for zsh users, zsh's own interpreter (not bash) ran this code,
+# and under zsh's default nomatch an unmatched .claude-* glob aborted the
+# command with "no matches found" instead of expanding to nothing. Now that
+# cdev is always invoked as a standalone executable with a #!/usr/bin/env
+# bash shebang, it always runs under real bash regardless of the caller's
+# login shell, so that scenario can no longer happen, this file's own globs
+# are never evaluated by zsh again. find stays anyway, it is still correct
+# and there is no reason to trade it for a glob now that the original reason
+# for it is moot.
 _cdev-accounts() {
   find "$HOME" -maxdepth 1 \( -type d -o -type l \) \
     \( -name '.claude' -o -name '.claude-*' \) 2>/dev/null | sort
@@ -454,14 +460,20 @@ _cdev-upgrade() {
 
   if [ "$status" -eq 0 ]; then
     echo ""
-    echo "Upgraded. This shell still holds the old functions, open a new one"
-    echo "or run 'source ~/.cdev.sh' to pick up $tag."
+    echo "Upgraded to $tag. No restart needed, the next 'cdev' command already runs it."
   fi
   return "$status"
 }
 
-# Reverse what install.sh did to this box: the systemd units, the source
-# line in the shell rc file, and the ~/.cdev.sh copy.
+# Reverse what install.sh did to this box: the cdev binary at
+# ~/.local/bin/cdev, and the three systemd units. Also strips two rc-file
+# leftovers that only exist on a box that went through the old sourced-
+# function model or a partial migration off it: the legacy
+# `source "$HOME/.cdev.sh"` line, and the `export PATH="$HOME/.local/bin:
+# $PATH"` line install.sh adds only when ~/.local/bin wasn't already on
+# PATH. Neither line exists on a fresh install where ~/.local/bin was
+# already on PATH (the common case), so that part of this function is a
+# migration safety net, not the primary thing being removed.
 #
 # A subcommand rather than its own script, unlike install.sh, because of when
 # each one runs. install.sh has to work before cdev exists on the box, so it
@@ -469,9 +481,10 @@ _cdev-upgrade() {
 # code is already here. That also means it needs no network, which matters:
 # people usually remove something because it is misbehaving.
 #
-# Note every failure path returns rather than exits. This file is sourced
-# into the user's interactive shell, so an `exit` here would close their
-# terminal.
+# Note every failure path returns rather than exits. cdev.sh can still be
+# sourced directly (the test suite does this to load its functions, and
+# nothing stops a user from doing the same), so an `exit` here would close
+# whatever shell it was sourced into rather than just this invocation.
 #
 # Deliberately conservative by default, since the things this could destroy
 # are the things people actually care about:
@@ -494,8 +507,8 @@ _cdev-uninstall() {
         cat <<'EOF'
 Usage: cdev uninstall [--kill-sessions] [--purge]
 
-Removes the cdev install from this box: systemd units, the source line in
-the shell rc file, and ~/.cdev.sh.
+Removes the cdev install from this box: the ~/.local/bin/cdev binary and
+the systemd units, plus any legacy rc-file lines left by an older install.
 
   --kill-sessions  Also stop every running tmux session in the registry.
                    Off by default, uninstalling should not kill live work.
@@ -568,44 +581,56 @@ EOF
 
   # Clean both rc files, not just the one matching $SHELL today. install.sh
   # picks the rc file by the shell active at install time, and someone who
-  # has switched shells since would otherwise be left with a dangling source
-  # line in the other file, which errors on every new shell once ~/.cdev.sh
-  # is gone.
-  # The single quotes are deliberate, the same way install.sh writes this
-  # line: the literal string $HOME is what sits in the rc file, so that is
-  # what has to be matched, not its expansion.
+  # has switched shells since would otherwise be left with a dangling line
+  # in the other file. Two lines to strip, not one: the legacy
+  # `source "$HOME/.cdev.sh"` line from the old sourced-function model, and
+  # the `export PATH="$HOME/.local/bin:$PATH"` line install.sh adds only
+  # when ~/.local/bin wasn't already on PATH. Both are migration leftovers,
+  # a fresh install where ~/.local/bin was already on PATH writes neither.
+  # The single quotes are deliberate, the same way install.sh writes these
+  # lines: the literal strings $HOME and $PATH are what sit in the rc file,
+  # so that is what has to be matched, not their expansion.
   # shellcheck disable=SC2016
-  local source_line='source "$HOME/.cdev.sh"'
-  local rc grep_status
+  local -a legacy_lines=(
+    'source "$HOME/.cdev.sh"'
+    'export PATH="$HOME/.local/bin:$PATH"'
+  )
+  local rc line grep_status
   for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
     [ -f "$rc" ] || continue
-    grep -qxF -- "$source_line" "$rc" || continue
+    for line in "${legacy_lines[@]}"; do
+      grep -qxF -- "$line" "$rc" || continue
 
-    # grep -vF into a temp file, then replace, for the same portability
-    # reason _cdev-kill does it: `sed -i` takes a mandatory backup suffix on
-    # BSD sed and none on GNU sed. Status 1 is not a failure, it means
-    # nothing was selected, which is exactly what an rc file holding nothing
-    # but the source line produces, and that empty result is the correct new
-    # contents. Only status 2 and up is a real error, and there the file is
-    # left alone rather than truncated.
-    grep_status=0
-    grep -vxF -- "$source_line" "$rc" > "$rc.cdev-tmp" || grep_status=$?
-    if [ "$grep_status" -le 1 ]; then
-      mv "$rc.cdev-tmp" "$rc"
-      echo "Removed the cdev source line from $rc."
-    else
-      rm -f "$rc.cdev-tmp"
-      echo "Could not rewrite $rc, leaving it untouched. Remove this line by hand:" >&2
-      echo "  $source_line" >&2
-    fi
+      # grep -vF into a temp file, then replace, for the same portability
+      # reason _cdev-kill does it: `sed -i` takes a mandatory backup suffix
+      # on BSD sed and none on GNU sed. Status 1 is not a failure, it means
+      # nothing was selected, which is exactly what an rc file holding
+      # nothing but this one line produces, and that empty result is the
+      # correct new contents. Only status 2 and up is a real error, and
+      # there the file is left alone rather than truncated.
+      grep_status=0
+      grep -vxF -- "$line" "$rc" > "$rc.cdev-tmp" || grep_status=$?
+      if [ "$grep_status" -le 1 ]; then
+        mv "$rc.cdev-tmp" "$rc"
+        echo "Removed a legacy cdev line from $rc."
+      else
+        rm -f "$rc.cdev-tmp"
+        echo "Could not rewrite $rc, leaving it untouched. Remove this line by hand:" >&2
+        echo "  $line" >&2
+      fi
+    done
   done
 
-  # .cdev-restore-all.sh and .cdev-healthcheck.sh are from installs predating
-  # the move to `cdev restore` / `cdev healthcheck` subcommands. Deleting
-  # ~/.cdev.sh out from under this running function is safe: the shell parsed
-  # it into memory when it was sourced and never reads the file again.
-  rm -f "$HOME/.cdev.sh" "$HOME/.cdev-restore-all.sh" "$HOME/.cdev-healthcheck.sh"
-  echo "Removed ~/.cdev.sh."
+  # ~/.local/bin/cdev is the binary itself, the primary thing this removes.
+  # .cdev.sh, .cdev-restore-all.sh, and .cdev-healthcheck.sh are legacy
+  # artifacts from installs predating the binary model (the sourced-function
+  # copy, and, further back, the standalone restore/healthcheck scripts it
+  # replaced); deleting them unconditionally is harmless even when they were
+  # never there. Deleting the binary out from under this running function is
+  # safe too: bash already read it into memory to run it and never reads the
+  # file again mid-execution.
+  rm -f "$HOME/.local/bin/cdev" "$HOME/.cdev.sh" "$HOME/.cdev-restore-all.sh" "$HOME/.cdev-healthcheck.sh"
+  echo "Removed ~/.local/bin/cdev."
 
   if [ "$purge" -eq 1 ]; then
     rm -f "$CDEV_REGISTRY" "$HOME/.cdev-notify"
@@ -616,8 +641,7 @@ EOF
   fi
 
   echo ""
-  echo "Uninstalled. The cdev function is still defined in this shell, open a"
-  echo "new one or run 'unset -f cdev' to clear it."
+  echo "Uninstalled. cdev is removed from PATH."
   if command -v loginctl >/dev/null 2>&1; then
     echo "Linger is still enabled. If nothing else on this box needs it:"
     echo "  sudo loginctl disable-linger $(whoami)"
@@ -644,7 +668,7 @@ _cdev-doctor-unit() {
 # Every systemctl/loginctl call is guarded so a machine without systemd, or
 # without a given unit installed, doesn't crash the function.
 _cdev-doctor() {
-  echo "Installed: cdev $CDEV_VERSION (~/.cdev.sh)"
+  echo "Installed: cdev $CDEV_VERSION (~/.local/bin/cdev)"
 
   # The $PWD comparison only ever helps someone developing in a checkout,
   # and it is skipped silently everywhere else. An install made with

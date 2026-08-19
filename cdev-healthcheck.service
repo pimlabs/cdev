@@ -3,4 +3,4 @@ Description=Check cdev sessions against the registry and notify on unexpected lo
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -c "source %h/.cdev.sh && cdev healthcheck"
+ExecStart=%h/.local/bin/cdev healthcheck

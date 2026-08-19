@@ -38,7 +38,8 @@ bats test/            # needs bats-core installed, it is not vendored here
 - `test/cdev_ensure.bats` registry dedup in `_cdev-ensure`
 - `test/cdev_kill.bats` registry line removal in `_cdev-kill` (the `cdev kill` subcommand)
 - `test/account_config_dir.bats` account to `CLAUDE_CONFIG_DIR` mapping
-- `test/install_shell_detection.bats` rc file picked by `install.sh`
+- `test/install_shell_detection.bats` rc file `install.sh` falls back to for
+  its `PATH` line when `~/.local/bin` isn't already on `PATH`
 - `test/cdev_restore_healthcheck.bats` the registry replay in `_cdev-restore`
   (including that it continues past a failing session) and the opt-in
   webhook gate in `_cdev-healthcheck`
@@ -62,8 +63,9 @@ past the session.
 
 ## Architecture
 
-Everything lives in one file, `cdev.sh` (sourced into `~/.bashrc` at install
-time). `cdev()` is the dispatcher and the only function meant to be called
+Everything lives in one file, `cdev.sh` (copied to `~/.local/bin/cdev` and
+made executable at install time, see the `install.sh` paragraph below).
+`cdev()` is the dispatcher and the only function meant to be called
 directly, the sole public entrypoint: it routes `cdev open`, `cdev status`,
 `cdev kill`, `cdev init`, `cdev accounts`, `cdev doctor`, `cdev upgrade`,
 `cdev restore`, `cdev healthcheck`, `cdev uninstall`, `cdev version`, and
@@ -114,9 +116,11 @@ prefix.
   (see below), and runs its `install.sh`. It deliberately does not decide
   which version is newer, comparing version
   strings portably is more machinery than it is worth, so it prints both and
-  installs what the project currently publishes. Afterwards it reminds the
-  user that their current shell still holds the old functions until they
-  open a new one or re-source `~/.cdev.sh`.
+  installs what the project currently publishes. Afterwards it tells the
+  user no restart is needed: `cdev` is a plain executable at
+  `~/.local/bin/cdev`, not a shell function held in memory, so the next
+  `cdev` invocation in any shell, including the one that just ran the
+  upgrade, already runs the new content at that same path.
 - `_cdev-doctor` reports the installed version, systemd unit state, and
   linger state, guarding every `systemctl`/`loginctl` call so a box without
   systemd reports that fact instead of crashing or claiming the units are
@@ -135,9 +139,11 @@ prefix.
   run with no attached terminal (no prompts, no blocking reads), since the
   boot path depends on that.
 - `_cdev-restore` replays every line of the registry through `_cdev-ensure`.
-  This is what the boot path runs. `cdev.sh` is sourced into an interactive
-  shell, so it cannot lean on `set -e` the way the old standalone script
-  could; instead `_cdev-restore` counts each `_cdev-ensure` failure
+  This is what the boot path runs. `cdev.sh` can still be sourced directly
+  (tests do this, and nothing stops a user from doing the same), and `set -e`
+  set inside a sourced file leaks into whatever it was sourced into, so it
+  cannot lean on `set -e` the way the old standalone script could; instead
+  `_cdev-restore` counts each `_cdev-ensure` failure
   explicitly, keeps going through the rest of the registry so one broken
   session does not block the others, and returns 1 at the end if any failed,
   so systemd still marks the unit failed rather than reporting a clean boot.
@@ -146,14 +152,25 @@ prefix.
   that disappeared without going through `cdev kill`. It is silent and a
   no-op unless `~/.cdev-notify` exists.
 
-Both the boot path and the periodic health check are now subcommands rather
-than standalone scripts, because systemd does not read the shell rc file: a
-unit cannot just run `cdev restore`, since `cdev` would not be defined yet in
-that shell. Each unit's `ExecStart` instead sources `cdev.sh` itself and then
-calls the subcommand in the same command:
-`/bin/bash -c "source %h/.cdev.sh && cdev restore"` (and `cdev healthcheck`
-for the health check unit). This is the same entrypoint a human uses, just
-invoked non-interactively. `cdev-restore.service`
+Both the boot path and the periodic health check are subcommands of `cdev`
+rather than standalone scripts, keeping the registry, locking, and
+config-dir logic in one file instead of duplicating it across separate
+scripts. Now that `cdev` is installed as a plain executable at
+`~/.local/bin/cdev` rather than sourced into a shell rc file, each unit's
+`ExecStart` calls it directly by its absolute path, `%h/.local/bin/cdev
+restore` (and `cdev healthcheck` for the health check unit), no shell
+wrapper, no `PATH` lookup, and no login shell to source anything from
+first. An earlier version had `cdev.sh` sourced into `~/.bashrc` or
+`~/.zshrc` instead, which meant a systemd unit had no shell where `cdev`
+was already defined, so `ExecStart` had to source the file itself before
+calling the subcommand: `/bin/bash -c "source %h/.cdev.sh && cdev
+restore"`. A `$PATH`-resolved binary needs no such step at all, and the
+same property is what fixed the friction that motivated dropping the
+sourced-function model on 19 August 2026: installing used to leave the
+very shell that ran `install.sh` without a working `cdev` until it was
+manually re-sourced or a new shell was opened, since a child process can
+never inject a function into its parent shell. This is the same
+entrypoint a human uses, just invoked non-interactively. `cdev-restore.service`
 (`Type=oneshot`, `RemainAfterExit=yes`, `WantedBy=default.target`) runs
 `cdev restore` at boot, safe to re-run by hand since `_cdev-ensure` no-ops on
 sessions that already exist. `cdev-healthcheck.service` runs
@@ -215,8 +232,8 @@ keep the `(return 0)` form.
 
 `CDEV_VERSION` is embedded as a variable near the top of `cdev.sh`.
 `_cdev-doctor` compares the installed version (`$CDEV_VERSION` from the
-sourced `~/.cdev.sh`) against the version in whatever `cdev.sh` sits in
-`$PWD`, when run from inside this repo's checkout. That comparison is
+running `~/.local/bin/cdev`) against the version in whatever `cdev.sh` sits
+in `$PWD`, when run from inside this repo's checkout. That comparison is
 best-effort: it is skipped entirely when no `cdev.sh` is found in the
 current directory, which is exactly why the GitHub-backed "Released:" check
 described above exists, it is the check that still fires when there is no
@@ -316,34 +333,64 @@ logging in from wherever the SSH session happens to land trusts the wrong
 path.
 
 `install.sh` is the only script that touches the box outside this repo's own
-files: it copies `cdev.sh` into `$HOME` (as the dotfile `.cdev.sh`), clears
-`$HOME/.cdev-restore-all.sh` and `$HOME/.cdev-healthcheck.sh` left over from
-an older install that used the now-deleted standalone scripts, appends a
-`source` line to the detected shell rc file (`~/.zshrc` or `~/.bashrc`), and
-installs all three systemd units. It enables two of them,
-`cdev-restore.service` and `cdev-healthcheck.timer`. `cdev-healthcheck.service`
-is installed but deliberately not enabled: it has no `[Install]` section and
-is activated by its timer, so enabling it directly would be wrong. Editing
-`cdev.sh` in this repo has no effect on an already-installed box until
-`install.sh` (or a manual copy) runs again, the two are not symlinked.
+files: it copies `cdev.sh` into `$HOME/.local/bin/cdev` and makes it
+executable, that is the whole install, `cdev` needs no loading step beyond
+being on `$PATH`. This replaced a design where `install.sh` copied `cdev.sh`
+to the dotfile `~/.cdev.sh` and appended a `source` line to the detected
+shell rc file, which had a real, reported problem: a shell function only
+becomes callable in shells that source the rc file *after* install, so the
+very shell that had just run the installer never got `cdev`, a child process
+can never inject a function into its parent shell. That friction was raised
+during a live VPS install attempt on 19 August 2026, and a `$PATH`-resolved
+executable avoids it structurally rather than working around it: unlike a
+shell function, it needs no loading step, it is resolved fresh (or from
+bash's per-session path hash, keyed by path not content) on every invocation,
+so the very next `cdev` typed, in any shell, already finds it. `install.sh`
+also clears `$HOME/.cdev.sh`, `$HOME/.cdev-restore-all.sh`, and
+`$HOME/.cdev-healthcheck.sh`, leftovers from the old sourced-function model
+and, further back, from an install that used now-deleted standalone scripts,
+strips the legacy `source "$HOME/.cdev.sh"` line from both rc files if
+present, ensures `~/.local/bin` is actually on `PATH` (appending an `export
+PATH=...` line to the detected shell rc file, `~/.zshrc` or `~/.bashrc`,
+only if it wasn't already there, which is not the case on stock Ubuntu, the
+common target here), and installs all three systemd units. It enables two of
+them, `cdev-restore.service` and `cdev-healthcheck.timer`.
+`cdev-healthcheck.service` is installed but deliberately not enabled: it has
+no `[Install]` section and is activated by its timer, so enabling it
+directly would be wrong. Editing `cdev.sh` in this repo has no effect on an
+already-installed box until `install.sh` (or a manual copy) runs again, the
+two are not symlinked. One concrete benefit of the binary model beyond fixing
+that friction: `cdev upgrade` (see below) used to leave the current shell
+running stale, already-loaded function definitions until it was re-sourced
+or a new shell opened; with a binary, the very next `cdev` invocation in the
+same shell already runs the newly-installed content at that same path, no
+shell-function staleness is possible.
 
 `_cdev-uninstall` (`cdev uninstall`) reverses exactly that: it disables and
-removes the three systemd units, strips the `source` line, and deletes
-`.cdev.sh` (plus the two legacy dotfiles). Unlike `install.sh` it is a
-subcommand, not its own script, because of when each one runs: install has
-to work before `cdev` exists on the box, so it must stand alone, while
-uninstall only ever runs after `cdev` is already installed, so the code is
-already there and it needs no network. That also means it runs inside the
-caller's own sourced shell rather than as a process that was always going to
-end, so every path through it must `return`, never `exit`, an `exit` here
-would close the user's terminal. `test/uninstall.bats` tests this directly.
-It cleans both `~/.bashrc` and `~/.zshrc` rather than only the shell detected
-as current, because `install.sh` picked the rc file by the shell active at
-install time, and someone who has since switched shells would otherwise be
-left with a dangling source line that errors on every new shell in the file
-`install.sh` never touched. It is deliberately conservative about three
-things an uninstall could otherwise "helpfully" clean up too far: running
-tmux sessions are left alone (uninstalling the launcher is not a reason to
+removes the three systemd units and deletes `~/.local/bin/cdev`, the binary
+itself, the primary thing it removes now. It also strips two rc-file lines
+that only exist on a box carrying leftovers from before the binary model,
+the legacy `source "$HOME/.cdev.sh"` line and the `export
+PATH="$HOME/.local/bin:$PATH"` line `install.sh` may have added, plus the
+legacy dotfiles (`.cdev.sh` and the two standalone-script leftovers).
+Neither rc-file line exists on a fresh install where `~/.local/bin` was
+already on `PATH`, so that part of uninstall is a migration safety net, not
+the primary removal target. Unlike `install.sh` it is a subcommand, not its
+own script, because of when each one runs: install has to work before `cdev`
+exists on the box, so it must stand alone, while uninstall only ever runs
+after `cdev` is already installed, so the code is already there and it needs
+no network. That also means it must not use `exit`, every path through it
+`return`s instead, since `cdev.sh` can still be sourced directly (the test
+suite loads its functions that way, and nothing stops a user from doing the
+same), and an `exit` there would close whatever shell it was sourced into.
+`test/uninstall.bats` tests this directly. It cleans both `~/.bashrc` and
+`~/.zshrc` rather than only the shell detected as current, because
+`install.sh` picked the rc file by the shell active at install time, and
+someone who has since switched shells would otherwise be left with a
+dangling line that errors on every new shell in the file `install.sh` never
+touched. It is deliberately conservative about three things an uninstall
+could otherwise "helpfully" clean up too far: running tmux sessions are left
+alone (uninstalling the launcher is not a reason to
 kill live work; `--kill-sessions` opts in), the registry and the notify file
 are kept so a reinstall picks up where you left off (`--purge` opts in), and
 linger is never disabled since other systemd `--user` services may depend on

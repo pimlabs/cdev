@@ -21,18 +21,23 @@ setup() {
 
   TEST_HOME="$(mktemp -d)"
   UNIT_DIR="$TEST_HOME/.config/systemd/user"
-  mkdir -p "$UNIT_DIR"
+  BIN_DIR="$TEST_HOME/.local/bin"
+  mkdir -p "$UNIT_DIR" "$BIN_DIR"
 
-  # A box that looks installed: dotfile, units, registry, notify file, and a
-  # source line in both rc files.
-  touch "$TEST_HOME/.cdev.sh"
+  # A box that looks installed under the current, binary model: an
+  # executable at ~/.local/bin/cdev, units, registry, notify file, and rc
+  # files with unrelated content but no legacy cdev lines (a fresh install
+  # never writes the old source line, and only writes a PATH line when
+  # ~/.local/bin wasn't already there, so the default fixture has neither).
+  touch "$BIN_DIR/cdev"
+  chmod +x "$BIN_DIR/cdev"
   touch "$UNIT_DIR/cdev-restore.service" \
         "$UNIT_DIR/cdev-healthcheck.service" \
         "$UNIT_DIR/cdev-healthcheck.timer"
   printf 'alpha personal /tmp/a\nbeta work /tmp/b\n' > "$TEST_HOME/.cdev-sessions"
   echo 'https://example.test/hook' > "$TEST_HOME/.cdev-notify"
-  echo 'source "$HOME/.cdev.sh"' > "$TEST_HOME/.bashrc"
-  printf '# my zshrc\nsource "$HOME/.cdev.sh"\nalias ll=ls\n' > "$TEST_HOME/.zshrc"
+  : > "$TEST_HOME/.bashrc"
+  printf '# my zshrc\nalias ll=ls\n' > "$TEST_HOME/.zshrc"
 }
 
 teardown() {
@@ -64,33 +69,47 @@ run_uninstall() {
     bash -c 'source "$0" && cdev uninstall "$@"' "$CDEV_ROOT/cdev.sh" "$@"
 }
 
-@test "uninstall removes the installed dotfile and the systemd unit files" {
+@test "uninstall removes the installed binary and the systemd unit files" {
   stub_tmux_alive
   run_uninstall
   [ "$status" -eq 0 ]
 
-  [ ! -f "$TEST_HOME/.cdev.sh" ]
+  [ ! -f "$BIN_DIR/cdev" ]
   [ ! -f "$UNIT_DIR/cdev-restore.service" ]
   [ ! -f "$UNIT_DIR/cdev-healthcheck.service" ]
   [ ! -f "$UNIT_DIR/cdev-healthcheck.timer" ]
 }
 
-@test "uninstall strips the source line from both rc files, not just one" {
+# Rewrites both rc files to simulate a box still on the old sourced-function
+# model, or one that went through install.sh's PATH-line fallback and never
+# finished migrating off it: .bashrc holds nothing but the legacy
+# `source "$HOME/.cdev.sh"` line, the case that broke first (see this file's
+# header), and .zshrc holds both legacy lines plus content unrelated to cdev,
+# so the cleanup is checked to leave what does not belong to it alone.
+simulate_legacy_rc_lines() {
+  echo 'source "$HOME/.cdev.sh"' > "$TEST_HOME/.bashrc"
+  printf '# my zshrc\nsource "$HOME/.cdev.sh"\nexport PATH="$HOME/.local/bin:$PATH"\nalias ll=ls\n' \
+    > "$TEST_HOME/.zshrc"
+}
+
+@test "uninstall strips legacy rc lines from both rc files, not just one" {
   stub_tmux_alive
+  simulate_legacy_rc_lines
   run_uninstall
   [ "$status" -eq 0 ]
 
   run grep -c 'cdev' "$TEST_HOME/.bashrc"
   [ "$output" = "0" ]
-  run grep -c 'cdev' "$TEST_HOME/.zshrc"
-  [ "$output" = "0" ]
+  ! grep -qxF 'source "$HOME/.cdev.sh"' "$TEST_HOME/.zshrc"
+  ! grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$TEST_HOME/.zshrc"
 }
 
-# The rc file holding nothing but the source line is the case that broke
+# The rc file holding nothing but a legacy line is the case that broke
 # first: grep selects no lines and exits 1, which is "nothing matched", not
 # an error, so the rewrite has to go ahead anyway.
-@test "an rc file containing only the source line ends up empty, not untouched" {
+@test "an rc file containing only a legacy line ends up empty, not untouched" {
   stub_tmux_alive
+  simulate_legacy_rc_lines
   run_uninstall
   [ "$status" -eq 0 ]
 
@@ -100,6 +119,7 @@ run_uninstall() {
 
 @test "uninstall leaves unrelated rc file content alone" {
   stub_tmux_alive
+  simulate_legacy_rc_lines
   run_uninstall
   [ "$status" -eq 0 ]
 
@@ -166,7 +186,7 @@ run_uninstall() {
   [[ "$output" == *"unknown option"* ]]
 
   # A rejected run must not have started tearing anything down.
-  [ -f "$TEST_HOME/.cdev.sh" ]
+  [ -f "$BIN_DIR/cdev" ]
 }
 
 @test "uninstall is safe to run twice" {

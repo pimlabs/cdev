@@ -17,7 +17,6 @@ sudo apt install -y tmux
 
 ```bash
 curl -fsSL https://cdev.pimlabs.id/install | bash
-source ~/.cdev.sh
 ```
 
 That is the one-line install, the same shape as Bun, rustup, or Docker's.
@@ -28,7 +27,6 @@ depend on the subdomain:
 
 ```bash
 curl -fsSL https://github.com/pimlabs/cdev/releases/latest/download/install.sh | bash
-source ~/.cdev.sh
 ```
 
 It needs `curl` and `tar` on the box, and it always installs the latest
@@ -44,17 +42,22 @@ running it, clone and run it from a checkout instead:
 git clone https://github.com/pimlabs/cdev.git
 cd cdev
 ./install.sh
-source ~/.cdev.sh
 ```
 
-Either way, `install.sh` copies `cdev.sh` to `~/.cdev.sh`, detects whether
-the login shell is zsh or bash and sources it from the matching rc file
-(`~/.zshrc` or `~/.bashrc`), and installs three `systemd --user` units.
-Everything, the interactive commands, the boot-time restore, and the health
-check, lives in that one `cdev.sh`, dispatched through `cdev restore` and
-`cdev healthcheck` the same way a human would call `cdev status`. It enables
-`cdev-restore.service`, which recreates every registered session
-automatically after a reboot with no manual step, and
+Either way, `install.sh` copies `cdev.sh` to `~/.local/bin/cdev` and makes it
+executable. `~/.local/bin` is on `PATH` by default on stock Ubuntu, the
+common target here, so `cdev` is callable immediately, in the very same shell
+that ran the installer, no `source` step and no new shell needed: a plain
+executable resolved off `PATH` needs no loading step the way a shell function
+sourced from an rc file does. If `~/.local/bin` isn't already on `PATH`,
+install.sh detects whether the login shell is zsh or bash and appends an
+`export PATH=...` line to the matching rc file (`~/.zshrc` or `~/.bashrc`)
+instead, and says so at the end of the run. It also installs three
+`systemd --user` units. Everything, the interactive commands, the boot-time
+restore, and the health check, lives in that one `cdev.sh`, dispatched
+through `cdev restore` and `cdev healthcheck` the same way a human would call
+`cdev status`. It enables `cdev-restore.service`, which recreates every
+registered session automatically after a reboot with no manual step, and
 `cdev-healthcheck.timer`, which drives `cdev-healthcheck.service` on a 5
 minute interval (that one stays silent until you opt in, see below). It also
 runs `sudo loginctl enable-linger` so those units can start before any
@@ -93,9 +96,10 @@ git pull
 ./install.sh
 ```
 
-Either path only updates `~/.cdev.sh` and the systemd units, your current
-shell keeps the old functions loaded until you open a new one or re-source
-`~/.cdev.sh`.
+Either path only updates `~/.local/bin/cdev` and the systemd units. Since
+`cdev` is a plain executable rather than a shell function, there is nothing
+to reload: the very next `cdev` command in any shell, including the one that
+just ran the upgrade, already runs the new version.
 
 ## Uninstall
 
@@ -103,13 +107,19 @@ shell keeps the old functions loaded until you open a new one or re-source
 cdev uninstall
 ```
 
-It reverses `install.sh`: disables and removes the three systemd units,
-strips the `source "$HOME/.cdev.sh"` line from both `~/.bashrc` and
-`~/.zshrc` (whichever one `install.sh` picked, plus the other, in case the
-shell changed since), and deletes `~/.cdev.sh`. A subcommand rather than its
-own script, unlike `install.sh`: uninstall only ever runs after `cdev` is
-already on the box, so it needs no network and no separate file, unlike
-installing, which has to work before `cdev` exists at all.
+It reverses `install.sh`: disables and removes the three systemd units and
+deletes the `~/.local/bin/cdev` binary, the primary thing it removes now that
+`cdev` is a plain executable rather than a sourced function. It also strips
+any leftover legacy rc-file lines from an older install, the `source
+"$HOME/.cdev.sh"` line from the old sourced-function model and the `export
+PATH="$HOME/.local/bin:$PATH"` line `install.sh` adds only when
+`~/.local/bin` wasn't already on `PATH`, from both `~/.bashrc` and
+`~/.zshrc`, in case the shell changed since install. On a fresh install
+where `~/.local/bin` was already on `PATH` (the common case) neither line
+was ever written, so there is nothing to clean up there at all. A subcommand
+rather than its own script, unlike `install.sh`: uninstall only ever runs
+after `cdev` is already on the box, so it needs no network and no separate
+file, unlike installing, which has to work before `cdev` exists at all.
 
 **Your running tmux sessions are not touched.** Uninstalling the launcher is
 not a reason to kill live Claude sessions, so they keep running under tmux
@@ -121,9 +131,9 @@ disabled since other `systemd --user` services may depend on it by now,
 `cdev uninstall` prints the `sudo loginctl disable-linger` command instead of
 running it, so you can decide.
 
-The `cdev` function stays defined in whichever shell you ran `cdev uninstall`
-from until you open a new one, or run `unset -f cdev` now. Run
-`cdev uninstall --help` for the full flag list.
+Removing the binary takes effect immediately in every shell, there is no
+function left loaded anywhere to unset. Run `cdev uninstall --help` for the
+full flag list.
 
 ## Commands
 
@@ -144,7 +154,7 @@ or `cdev -- <name>` instead if it needs to be.
 | `cdev upgrade` | Install the latest tagged release. For a curl-installed box (no checkout to `git pull`): downloads that release's tarball and runs its `install.sh`. No-ops with a message if you're already on the latest tag. |
 | `cdev restore` | Recreate every registered session. Run automatically at boot by `cdev-restore.service`; safe to run by hand too, it no-ops on sessions that already exist. |
 | `cdev healthcheck` | Report registered sessions that vanished from tmux without going through `cdev kill`. Run every 5 minutes by `cdev-healthcheck.timer`; silent unless `~/.cdev-notify` holds a webhook URL. |
-| `cdev uninstall` | Remove cdev from this box: systemd units, the rc file source line, `~/.cdev.sh`. See [Uninstall](#uninstall) above. |
+| `cdev uninstall` | Remove cdev from this box: systemd units and the `~/.local/bin/cdev` binary. See [Uninstall](#uninstall) above. |
 | `cdev version` (`--version`, `-v`) | Print the installed cdev version. |
 | `cdev help` (`--help`, `-h`) | Show usage and the subcommand list. Also what bare `cdev` prints. |
 
@@ -220,8 +230,9 @@ alive either way.
 deliberately-stopped session doesn't come back. `cdev restore` reads that
 file and recreates each entry the same way `cdev` does when it creates a new
 session, just without attaching; `cdev-restore.service` runs it once at
-boot, by sourcing `~/.cdev.sh` and calling `cdev restore` directly. A
-session that stops some other way (server reboot, crash) stays in the
+boot, by calling `~/.local/bin/cdev restore` directly, its absolute path,
+no shell wrapper needed. A session that stops some other way (server
+reboot, crash) stays in the
 registry and gets recreated automatically the next time the box comes up.
 `cdev restore` is also safe to run by hand at any time, it no-ops on
 sessions that already exist and only reports a failure for the ones that
@@ -230,8 +241,8 @@ didn't come up.
 ## Health-check notifications (optional)
 
 `cdev-healthcheck.timer` runs every 5 minutes and drives
-`cdev-healthcheck.service`, which sources `~/.cdev.sh` and calls
-`cdev healthcheck`. That compares the registry against the tmux sessions
+`cdev-healthcheck.service`, which calls `~/.local/bin/cdev healthcheck`
+directly. That compares the registry against the tmux sessions
 actually running. If a registered session vanished without going through
 `cdev kill` (a crash, an OOM kill, anything other than a deliberate stop),
 it POSTs a plain-text message describing which session disappeared to a
