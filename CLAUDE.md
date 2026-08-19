@@ -46,8 +46,9 @@ bats test/            # needs bats-core installed, it is not vendored here
   distinguishing a dead-but-`remain-on-exit`-held pane from a genuinely live
   one, `_cdev-ensure` killing and recreating a session left in that dead
   state, that it creates the session directory when it doesn't exist, and
-  that it `git init`s a brand new one but leaves an already-initialized
-  repository (its existing commits included) untouched
+  that it `git init`s a brand new one (with a resolvable `HEAD`, not just a
+  bare repository) but leaves an already-initialized repository (its
+  existing commits included) untouched
 - `test/cdev_kill.bats` registry line removal in `_cdev-kill` (the `cdev kill` subcommand)
 - `test/account_config_dir.bats` account to `CLAUDE_CONFIG_DIR` mapping
 - `test/install_shell_detection.bats` rc file `install.sh` falls back to for
@@ -230,9 +231,16 @@ prefix.
   the day after the trust-retry fix above shipped: a brand new project,
   exactly the case that fix targets, died right after with "Worktree mode
   requires a git repository", a second, separate failure only visible once
-  the trust one was out of the way, since trust is checked first), and
-  kills a same-named session left behind with a dead pane before creating a
-  fresh one, `tmux new-session` would otherwise fail with "duplicate
+  the trust one was out of the way, since trust is checked first), leaves
+  an empty initial commit on that fresh repo too (found on the very next
+  live test right after: an empty repo has no commit for `HEAD` to resolve
+  to, and `claude`'s own worktree creation needs to resolve `HEAD` as the
+  base branch, unlike a plain `git worktree add`, which tolerates a
+  commit-less repo by inferring an orphan branch; the commit is made with a
+  scoped `-c user.name`/`-c user.email`, not the user's global git config,
+  since a fresh box may have no git identity configured yet), and kills a
+  same-named session left behind with a dead pane before creating a fresh
+  one, `tmux new-session` would otherwise fail with "duplicate
   session" against the leftover. It is also the one function called
   non-interactively, so it must stay safe to run with no attached terminal
   (no prompts, no blocking reads), since the boot path depends on that.

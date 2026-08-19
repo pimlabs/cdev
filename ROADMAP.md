@@ -379,6 +379,21 @@ behind the trust failure, only surfacing once that one was actually fixed.
 - [x] Added tests confirming a brand new directory gets `git init`-ed and
       an already-initialized one, existing commits included, is left alone.
 
+The very next live-VPS test right after that one landed found a third
+layer behind the same two: `git init` alone leaves a repository with no
+commit, so `HEAD` doesn't resolve to anything, and `claude remote-control`'s
+own worktree creation needs to resolve `HEAD` as the base branch. It died
+with `Failed to resolve base branch "HEAD": git rev-parse failed`. Plain
+`git worktree add` tolerates a commit-less repo by inferring an orphan
+branch; `claude`'s own worktree logic does not have that fallback.
+
+- [x] `_cdev-ensure`'s `git init` now also leaves an empty initial commit,
+      made with a command-scoped `-c user.name`/`-c user.email` rather than
+      touching the user's global git config, since a fresh box may have no
+      git identity configured at all yet.
+- [x] Added a test asserting `git rev-parse HEAD` resolves after
+      `_cdev-ensure` on a brand new directory, not just that it's a repo.
+
 ## Bigger scale (high effort, changes project philosophy)
 
 This moves cdev from a small, predictable single-box tool toward a small

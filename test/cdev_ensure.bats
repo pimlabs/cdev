@@ -76,6 +76,17 @@ teardown() {
   git -C "$TEST_HOME/projects/git-me" rev-parse --is-inside-work-tree
 }
 
+@test "cdev-ensure's git init also leaves an initial commit for HEAD to resolve" {
+  # git init alone is not enough: an empty repo has no commit for HEAD to
+  # resolve to, and claude's own worktree creation needs to resolve HEAD as
+  # the base branch, found live on a VPS right after the plain git init fix
+  # shipped, failing with "Failed to resolve base branch \"HEAD\": git
+  # rev-parse failed". Also has to work on a box with no git identity
+  # configured at all yet, a fresh VPS is exactly that.
+  _cdev-ensure git-me-head personal "$TEST_HOME/projects/git-me-head"
+  git -C "$TEST_HOME/projects/git-me-head" rev-parse HEAD
+}
+
 @test "cdev-ensure leaves an already-initialized project directory alone" {
   local dir="$TEST_HOME/projects/already-git"
   mkdir -p "$dir"

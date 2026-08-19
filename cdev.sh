@@ -7,7 +7,7 @@
 # `cdev healthcheck` the same way a human would, by the binary's absolute
 # path (%h/.local/bin/cdev).
 
-CDEV_VERSION="0.9.0"
+CDEV_VERSION="0.10.0"
 CDEV_REGISTRY="$HOME/.cdev-sessions"
 CDEV_REGISTRY_LOCK="$CDEV_REGISTRY.lock"
 CDEV_REPO="${CDEV_REPO:-pimlabs/cdev}"
@@ -101,8 +101,22 @@ _cdev-ensure() {
   # present at all, same reasoning as the tmux/claude presence guards
   # elsewhere: if it's missing, remote-control's own error is still clear,
   # this would just be a second, redundant one.
+  #
+  # `git init` alone is not enough: found on the very next live VPS test
+  # right after this shipped, an empty repo has no commit for HEAD to
+  # resolve to, and claude's own worktree creation needs to resolve HEAD as
+  # the base branch, failing with "Failed to resolve base branch \"HEAD\":
+  # git rev-parse failed", a plain `git worktree add` tolerates a
+  # commit-less repo by inferring an orphan branch, but that fallback isn't
+  # something claude's own worktree logic does. An empty initial commit
+  # gives HEAD something to resolve to. `-c user.name`/`-c user.email`
+  # scope an identity to just this one command, a fresh box may have no
+  # git identity configured at all yet, without touching the user's own
+  # global git config.
   if command -v git >/dev/null 2>&1 && ! git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git init "$dir" >/dev/null 2>&1
+    git -C "$dir" -c user.name=cdev -c user.email=cdev@localhost \
+      commit --allow-empty -q -m "Initial commit" >/dev/null 2>&1
   fi
 
   # A same-named session that exists but is dead blocks `new-session` below
