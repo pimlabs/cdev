@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-19
+
 ### Changed
 
 - `cdev` is now installed as a plain executable at `~/.local/bin/cdev` instead of being copied to `~/.cdev.sh` and sourced into `~/.bashrc`/`~/.zshrc`. The old model meant the shell that just ran the installer never had `cdev` available, only shells that sourced the rc file after install did, so every install ended with a manual `source ~/.cdev.sh` or a new shell. A `$PATH`-resolved executable needs no such step: the next `cdev` typed, in the same shell that ran the installer, already works, `~/.local/bin` is on `PATH` by default on stock Ubuntu. If it isn't, `install.sh` now falls back to appending `export PATH="$HOME/.local/bin:$PATH"` to the detected rc file instead. Upgrading an existing install is automatic and transparent: `install.sh` (which `cdev upgrade` re-runs) removes the old `~/.cdev.sh` and strips the legacy `source` line from both rc files if present, and `cdev uninstall` now removes the `~/.local/bin/cdev` binary as its primary target, keeping the rc-file cleanup only as a fallback for a box still on the old model
@@ -69,6 +71,7 @@ old `cdev-status`, `cdev-kill`, `cdev-init`, `cdev-accounts`, and
 - `_cdev-ensure`'s dedup check now passes `--` to grep. Without it a registry line starting with a dash was read by grep as its own options, so the check failed and the line was appended again on every call
 - `_cdev-restore` iterates over a snapshot of the registry rather than the live file. Combined with the dedup bug above, reading the file while `_cdev-ensure` appended to it turned the loop into one that never ended and a registry that grew without limit (a real run reached 12,657 identical lines)
 
-[Unreleased]: https://github.com/pimlabs/cdev/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/pimlabs/cdev/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/pimlabs/cdev/releases/tag/v0.4.0
 [0.3.0]: https://github.com/pimlabs/cdev/releases/tag/v0.3.0
 [0.2.0]: https://github.com/pimlabs/cdev/releases/tag/v0.2.0
