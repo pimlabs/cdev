@@ -43,3 +43,27 @@ exit 0
   [[ "$output" == *"cdev-healthcheck.timer:"* ]]
   [[ "$output" == *"loginctl linger:"* ]]
 }
+
+@test "doctor reports claude and tmux versions when both are on PATH" {
+  write_stub curl 'exit 1'
+  write_stub claude 'echo "1.2.3 (Claude Code)"'
+  write_stub tmux 'echo "tmux 3.3a"'
+
+  run _cdev-doctor
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"claude: 1.2.3 (Claude Code)"* ]]
+  [[ "$output" == *"tmux: tmux 3.3a"* ]]
+}
+
+@test "doctor reports claude and tmux as missing instead of silently skipping them" {
+  write_stub curl 'exit 1'
+  # No claude or tmux stub, and PATH restricted to only $STUB_BIN for this
+  # one invocation (no fallthrough to whatever this machine happens to have
+  # installed for real), so both are genuinely unresolvable, the case this
+  # test exists to cover. Scoped to the `run` call only, PATH-wide teardown
+  # (rm, etc.) still needs the real PATH afterward.
+  PATH="$STUB_BIN" run _cdev-doctor
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"claude: not found on PATH"* ]]
+  [[ "$output" == *"tmux: not found on PATH"* ]]
+}

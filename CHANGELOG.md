@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- `cdev doctor` now reports `claude` and `tmux`, both hard requirements it never actually checked for before, presence and version if found, a plain "not found on PATH" if not. Their absence used to only ever surface as a confusing mid-session failure, a bare tmux `[exited]` pane with no context, instead of a clear answer here
+- `cdev doctor` prints a `Running from:` line showing the exact path it executed from, useful confirmation that a report is coming from the real installed binary and not something else on `PATH`
+
 ## [0.4.0] - 2026-08-19
 
 ### Changed

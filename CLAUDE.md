@@ -133,7 +133,12 @@ prefix.
   date", which is the bug the GitHub check fixes. When GitHub is
   unreachable, `curl` is missing, or there is no release yet, doctor prints
   "Released: could not check (no network, no curl, or no release yet)"
-  rather than aborting or staying silent; `_cdev-help` prints usage.
+  rather than aborting or staying silent. It also reports `claude` and
+  `tmux`, presence and version if found, a plain "not found on PATH" if not,
+  the two hard requirements cdev never actually checked for before a live
+  VPS test surfaced how confusing their absence looked otherwise (a bare
+  tmux `[exited]` pane with no context). A `Running from: $0` line confirms
+  the report came from the real installed binary; `_cdev-help` prints usage.
 - `_cdev-ensure` creates the tmux session and records it in the registry. It
   is also the one function called non-interactively, so it must stay safe to
   run with no attached terminal (no prompts, no blocking reads), since the

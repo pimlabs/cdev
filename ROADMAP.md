@@ -256,6 +256,29 @@ invocation in the same shell already runs the newly-installed content at
 that same path, same file, new bytes, no separate reload step, and no
 staleness window is possible.
 
+The very next live-VPS test after that migration landed found the leftover
+edge case it created: a shell that had an older `cdev` sourced into it
+before the binary switch keeps that function loaded in memory for the life
+of the shell, and bash checks functions before `$PATH`, so the stale
+function silently wins over the correct binary. On this project's own test
+VPS the leftover function predated even the single-entrypoint refactor, old
+enough to have no subcommand dispatch at all, so every subcommand, `doctor`
+included, was treated as a project name to attach to, failing with a bare
+tmux `[exited]`.
+
+- [x] `cdev doctor` now reports `claude` and `tmux` presence and version,
+      both hard requirements it never actually checked before, so their
+      absence gets a plain answer instead of surfacing later as a confusing
+      mid-session failure.
+- [x] `cdev doctor` prints a `Running from:` line, the exact path it
+      executed from, confirming a report came from the real installed
+      binary.
+- [x] Documented the stale-function-shadowing failure mode itself in
+      README's Known issues, `cdev` cannot detect it from inside itself (a
+      child process can't see the calling shell's function table), so this
+      is a documented `type cdev` / `unset -f cdev` fix rather than an
+      auto-detected one, the same shape as the other two Known issues above.
+
 ## Bigger scale (high effort, changes project philosophy)
 
 This moves cdev from a small, predictable single-box tool toward a small

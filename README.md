@@ -277,3 +277,18 @@ doesn't exist, the health check exits immediately and does nothing.
   appears. `cdev status` does not help here either: it has no login or
   credential column at all, so an expired session looks exactly like a
   healthy one.
+- **A stale `cdev` shell function can shadow the real binary**: if this shell
+  ever had an older `cdev` sourced into it (from before the switch to a
+  `~/.local/bin/cdev` binary, or from a previous install attempt on this same
+  box), that function stays loaded in memory for the life of the shell,
+  editing files on disk afterward doesn't undo it. Bash checks shell
+  functions before `$PATH`, so a stale function silently wins over the
+  correct binary, and every subcommand behaves like whatever that old
+  function did, an old enough one may not even recognize subcommands at all
+  and try to attach to a project literally named `doctor` or `--help`,
+  failing with a bare tmux `[exited]`. `cdev` cannot detect this from inside
+  itself, a child process can't see the functions defined in the shell that
+  launched it. If a command behaves like it's ignoring its own subcommand,
+  run `type cdev`: if it says "is a function" instead of pointing at
+  `~/.local/bin/cdev`, run `unset -f cdev` in that shell, or just open a new
+  one.

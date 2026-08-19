@@ -669,6 +669,7 @@ _cdev-doctor-unit() {
 # without a given unit installed, doesn't crash the function.
 _cdev-doctor() {
   echo "Installed: cdev $CDEV_VERSION (~/.local/bin/cdev)"
+  echo "Running from: $0"
 
   # The $PWD comparison only ever helps someone developing in a checkout,
   # and it is skipped silently everywhere else. An install made with
@@ -695,6 +696,25 @@ _cdev-doctor() {
     # Offline, no curl, or no releases yet. Not a fault worth an error, but
     # not something to leave looking like a clean bill of health either.
     echo "Released:  could not check (no network, no curl, or no release yet)"
+  fi
+
+  echo ""
+
+  # claude and tmux are both hard requirements cdev has never actually
+  # checked for before now. Their absence used to only ever surface as a
+  # confusing mid-session failure, a bare tmux [exited] pane with no
+  # context, or a session that silently never starts, instead of a plain
+  # answer here.
+  if command -v claude >/dev/null 2>&1; then
+    echo "claude: $(claude --version 2>/dev/null || echo 'installed, but claude --version failed')"
+  else
+    echo "claude: not found on PATH (required, cdev cannot start any session without it)"
+  fi
+
+  if command -v tmux >/dev/null 2>&1; then
+    echo "tmux: $(tmux -V 2>/dev/null || echo 'installed, but tmux -V failed')"
+  else
+    echo "tmux: not found on PATH (required, install with: sudo apt install -y tmux)"
   fi
 
   echo ""
