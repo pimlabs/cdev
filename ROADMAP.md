@@ -163,6 +163,11 @@ About keeping the project easy to work on, not new user-facing behavior.
 - [x] Add a `bats-core` test suite for the pieces that don't need a live
       tmux/VPS: registry dedup in `cdev-ensure`, line removal in
       `cdev-kill`, account-to-config-dir mapping.
+- [x] Restructured README (table of contents, de-duplicated the
+      reserved-word explanation, broke the install-section wall of text into
+      scannable bullets) and added `LICENSE` (MIT), now that the repo is
+      public. Requirements section now names `claude` alongside `tmux`,
+      matching what `doctor` already treats as a hard requirement.
 - [x] Surfacing a stale install is covered by `cdev doctor` in the
       single-entrypoint track above, superseded there.
 

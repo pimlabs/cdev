@@ -1,17 +1,42 @@
 # cdev
 
+[![release](https://img.shields.io/github/v/release/pimlabs/cdev)](https://github.com/pimlabs/cdev/releases/latest)
+[![shellcheck](https://github.com/pimlabs/cdev/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/pimlabs/cdev/actions/workflows/shellcheck.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Persistent, multi-account Claude Code sessions on any server, over tmux.
 Survives SSH disconnects, laptop sleep, and reboots. Originally built for a
 single VPS, split out here because it has no dependency on that VPS or any
 specific project, install it on whichever box you want to develop from.
 
+## Contents
+
+- [Requirements](#requirements)
+- [Install](#install)
+  - [Verifying the install](#verifying-the-install)
+  - [Upgrading](#upgrading)
+- [Uninstall](#uninstall)
+- [Commands](#commands)
+- [Connecting from your phone or another browser](#connecting-from-your-phone-or-another-browser)
+- [Basic tmux, if you're not used to it](#basic-tmux-if-youre-not-used-to-it)
+- [Reboot recovery](#reboot-recovery)
+- [Health-check notifications (optional)](#health-check-notifications-optional)
+- [Known issues](#known-issues)
+- [License](#license)
+
 ## Requirements
 
-`tmux`, installed first if it's not already on the box:
+Two things, both required before installing, `cdev doctor` checks for both
+afterward and says plainly if either is missing:
 
-```bash
-sudo apt install -y tmux
-```
+- `tmux`, installed first if it's not already on the box:
+
+  ```bash
+  sudo apt install -y tmux
+  ```
+
+- The [Claude Code](https://claude.ai/code) CLI (`claude`), logged in or not,
+  cdev handles login per account (see [Commands](#commands) below).
 
 ## Install
 
@@ -46,22 +71,27 @@ cd cdev
 
 Either way, `install.sh` copies `cdev.sh` to `~/.local/bin/cdev` and makes it
 executable. `~/.local/bin` is on `PATH` by default on stock Ubuntu, the
-common target here, so `cdev` is callable immediately, in the very same shell
+common target here, so `cdev` is callable immediately in the very same shell
 that ran the installer, no `source` step and no new shell needed: a plain
-executable resolved off `PATH` needs no loading step the way a shell function
-sourced from an rc file does. If `~/.local/bin` isn't already on `PATH`,
-install.sh detects whether the login shell is zsh or bash and appends an
-`export PATH=...` line to the matching rc file (`~/.zshrc` or `~/.bashrc`)
-instead, and says so at the end of the run. It also installs three
-`systemd --user` units. Everything, the interactive commands, the boot-time
-restore, and the health check, lives in that one `cdev.sh`, dispatched
-through `cdev restore` and `cdev healthcheck` the same way a human would call
-`cdev status`. It enables `cdev-restore.service`, which recreates every
-registered session automatically after a reboot with no manual step, and
-`cdev-healthcheck.timer`, which drives `cdev-healthcheck.service` on a 5
-minute interval (that one stays silent until you opt in, see below). It also
-runs `sudo loginctl enable-linger` so those units can start before any
-interactive login.
+executable resolved off `PATH` needs no loading step the way a shell
+function sourced from an rc file does. If `~/.local/bin` isn't already on
+`PATH`, install.sh detects whether the login shell is zsh or bash and
+appends an `export PATH=...` line to the matching rc file instead
+(`~/.zshrc` or `~/.bashrc`), and says so at the end of the run.
+
+It also installs three `systemd --user` units. Everything, the interactive
+commands, the boot-time restore, and the health check, lives in that one
+`cdev.sh`, dispatched through `cdev restore` and `cdev healthcheck` the same
+way a human would call `cdev status`:
+
+- **`cdev-restore.service`**, enabled: recreates every registered session
+  automatically after a reboot, no manual step.
+- **`cdev-healthcheck.timer`**, enabled: drives `cdev-healthcheck.service`
+  every 5 minutes, stays silent until you opt in, see
+  [Health-check notifications](#health-check-notifications-optional).
+
+It also runs `sudo loginctl enable-linger` so those units can start before
+any interactive login.
 
 ### Verifying the install
 
@@ -139,9 +169,7 @@ full flag list.
 
 `cdev` is a single entrypoint, `cdev <subcommand> ...`. `cdev <name>
 [account] [dir]` (bare, no subcommand word) is the default action: create if
-needed, then attach. A project can't be named after a reserved subcommand
-word below (`status`, `kill`, `doctor`, and the rest), use `cdev open <name>`
-or `cdev -- <name>` instead if it needs to be.
+needed, then attach.
 
 | Command | Does |
 |---|---|
@@ -225,14 +253,24 @@ alive either way.
 
 ## Reboot recovery
 
-`cdev` appends every session it creates to `~/.cdev-sessions` (one line:
-`name account dir`). `cdev kill` removes the matching line so a
-deliberately-stopped session doesn't come back. `cdev restore` reads that
-file and recreates each entry the same way `cdev` does when it creates a new
-session, just without attaching; `cdev-restore.service` runs it once at
-boot, by calling `~/.local/bin/cdev restore` directly, its absolute path,
-no shell wrapper needed. A session that stops some other way (server
-reboot, crash) stays in the
+Every session lives in one registry file, `~/.cdev-sessions`, one line per
+session: `name account dir`.
+
+- **`cdev <name>`** appends to it when it creates a session.
+- **`cdev kill <name>`** removes the matching line, so a
+  deliberately-stopped session doesn't come back.
+- **`cdev doctor`** adopts any live tmux session it finds missing from the
+  file, so a session started outside `cdev` (or a line lost to a manual
+  edit) survives a reboot too instead of silently disappearing. Account and
+  directory are best-effort guesses read from the session's own tmux state,
+  worth a quick `cdev status` check after an adoption if the directory
+  matters.
+- **`cdev restore`** reads the file and recreates every entry the same way
+  `cdev` does when it creates a new session, just without attaching.
+  `cdev-restore.service` runs it once at boot, by calling `~/.local/bin/cdev
+  restore` directly, its absolute path, no shell wrapper needed.
+
+A session that stops some other way (server reboot, crash) stays in the
 registry and gets recreated automatically the next time the box comes up.
 `cdev restore` is also safe to run by hand at any time, it no-ops on
 sessions that already exist and only reports a failure for the ones that
@@ -292,3 +330,7 @@ doesn't exist, the health check exits immediately and does nothing.
   run `type cdev`: if it says "is a function" instead of pointing at
   `~/.local/bin/cdev`, run `unset -f cdev` in that shell, or just open a new
   one.
+
+## License
+
+[MIT](LICENSE)
