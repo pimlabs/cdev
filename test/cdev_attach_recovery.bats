@@ -106,3 +106,26 @@ esac
   [ "$status" -eq 0 ]
   [ ! -f "$TEST_HOME/claude-called" ]
 }
+
+@test "cdev-wait-for-alive sleeps before its first check, not just between retries" {
+  # Regression test for a real bug: `tmux new-session -d` only waits for
+  # the pane to be forked, not for the command inside it to actually run
+  # far enough to fail. Checking immediately, with no sleep at all first,
+  # can catch a session that is about to die in the split second before it
+  # actually has, reading it as alive and skipping the whole trust-retry
+  # path with no diagnostic printed. This stub reports alive on the very
+  # first possible check, so the only way this test can fail is if
+  # _cdev-wait-for-alive trusts that immediate reading without ever
+  # sleeping first.
+  write_stub tmux '
+case "$1" in
+  has-session) exit 0 ;;
+  display-message) echo 0 ;;
+  *) exit 0 ;;
+esac
+'
+  write_stub sleep 'echo "slept: $*" >> "$TEST_HOME/sleep.log"; exit 0'
+
+  _cdev-wait-for-alive already-alive-immediately
+  [ -f "$TEST_HOME/sleep.log" ]
+}

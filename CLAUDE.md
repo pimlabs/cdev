@@ -58,9 +58,11 @@ bats test/            # needs bats-core installed, it is not vendored here
 - `test/cdev_attach_recovery.bats` `_cdev-attach`'s automatic trust-step
   retry when a session dies immediately (stateful tmux/claude stubs play out
   "created dead, trust step runs, recreated alive" rather than a canned
-  single response), that it gives up cleanly if the retry also fails, and
-  that an already-alive session skips the retry path entirely, never
-  launching `claude` at all
+  single response), that it gives up cleanly if the retry also fails, that
+  an already-alive session skips the retry path entirely, never launching
+  `claude` at all, and that `_cdev-wait-for-alive` always sleeps before its
+  first check rather than trusting an immediate reading (regression test
+  for the 0.8.0 race, see `_cdev-session-alive` above)
 - `test/dispatcher_flags.bats` flag handling in the `cdev()` dispatcher, and
   the registry-corruption chain it once caused (see the file's own header)
 - `test/uninstall.bats` `cdev uninstall`, including that its conservative
@@ -204,7 +206,19 @@ prefix.
   `_cdev-attach`'s first attempt and its trust-step retry) around it, tries
   and interval overridable via `CDEV_POLL_TRIES`/`CDEV_POLL_INTERVAL` so
   tests don't pay the real 3-second wait, `test/test_helper.bash`'s
-  `stub_bin_dir` sets both to run instantly.
+  `stub_bin_dir` sets both to run instantly. Its first version, shipped in
+  0.7.0, checked immediately with no sleep before the first look, which
+  carried its own race live on a VPS the same day: `tmux new-session -d`
+  only waits for the pane to fork, not for the command inside to run far
+  enough to fail, so a session dying fast (an untrusted directory, exactly
+  the case the retry exists for) could still be a few milliseconds from
+  exiting at that instant, reading as alive and skipping the whole retry
+  path silently. It now sleeps once before every check, first one included,
+  not only between retries, closing that window. A stub-based test cannot
+  reproduce a real scheduling race, so the regression test for this asserts
+  the structural guarantee instead: `_cdev-wait-for-alive` must call
+  `sleep` at least once even when a stub reports alive on the very first
+  possible check.
 - `_cdev-ensure` creates the tmux session and records it in the registry. It
   creates `dir` first if it does not exist yet (tmux refuses a working
   directory that is missing, and the natural way to use `cdev <name>
