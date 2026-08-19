@@ -846,14 +846,17 @@ cdev() {
   esac
 }
 
-# Let `./cdev.sh <args>` work directly too, not only `source cdev.sh` then
-# `cdev <args>`. `return` only succeeds inside a function or a sourced file,
-# so wrapping it in a subshell and checking the result is the standard,
-# reliable way to tell sourced from executed. The comparison this used to
-# do, BASH_SOURCE[0] against $0, looks equivalent but is not: anything that
-# invokes bash with an explicit $0 matching the sourced path, which a test
-# harness can do easily, makes that comparison misreport a sourced call as a
-# direct one. This is a no-op for the installed, sourced-into-rc-file case.
+# This is what makes cdev work when installed as a plain executable: run
+# directly (`~/.local/bin/cdev <args>`, or `./cdev.sh <args>` in a checkout),
+# it dispatches immediately. `return` only succeeds inside a function or a
+# sourced file, so wrapping it in a subshell and checking the result is the
+# standard, reliable way to tell sourced from executed. The comparison this
+# used to do, BASH_SOURCE[0] against $0, looks equivalent but is not:
+# anything that invokes bash with an explicit $0 matching the sourced path,
+# which a test harness can do easily, makes that comparison misreport a
+# sourced call as a direct one. This stays a no-op only when something
+# sources this file on purpose, the test suite does, to load its functions
+# into a shell without also running `cdev` with no args.
 if ! (return 0 2>/dev/null); then
   cdev "$@"
 fi
