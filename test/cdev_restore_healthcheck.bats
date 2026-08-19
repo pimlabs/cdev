@@ -90,9 +90,9 @@ exit 0
   export TMUX_LOG
 
   cat > "$CDEV_REGISTRY" <<REGEOF
-alpha personal /home/x/projects/alpha
-beta work /home/x/projects/beta
-gamma personal /home/x/projects/gamma
+alpha personal $TEST_HOME/projects/alpha
+beta work $TEST_HOME/projects/beta
+gamma personal $TEST_HOME/projects/gamma
 REGEOF
 
   run _cdev-restore
@@ -114,9 +114,9 @@ REGEOF
   export TMUX_LOG TMUX_FAIL_NAME
 
   cat > "$CDEV_REGISTRY" <<REGEOF
-alpha personal /home/x/projects/alpha
-beta work /home/x/projects/beta
-gamma personal /home/x/projects/gamma
+alpha personal $TEST_HOME/projects/alpha
+beta work $TEST_HOME/projects/beta
+gamma personal $TEST_HOME/projects/gamma
 REGEOF
 
   run _cdev-restore
@@ -169,5 +169,40 @@ REGEOF
   [ "$calls" -eq 1 ]
   grep -q "https://example.com/webhook" "$CURL_LOG"
   grep -q "'dead'" "$CURL_LOG"
+  ! grep -q "'alive'" "$CURL_LOG"
+}
+
+@test "_cdev-healthcheck also fires for a session whose pane died but is held open by remain-on-exit" {
+  # Not just a vanished session: a crashed pane kept around by
+  # remain-on-exit still "has" a session under its name, has-session alone
+  # would never catch it, the exact gap that let a dead session go
+  # unnoticed through a plain reattach too.
+  write_stub tmux '
+case "$1" in
+  has-session) exit 0 ;;
+  display-message)
+    [ "$3" = "zombie" ] && echo "1" || echo "0"
+    ;;
+  *) exit 0 ;;
+esac
+'
+  stub_curl_logging
+  CURL_LOG="$TEST_HOME/curl.log"
+  export CURL_LOG
+
+  echo "https://example.com/webhook" > "$TEST_HOME/.cdev-notify"
+  cat > "$CDEV_REGISTRY" <<REGEOF
+alive personal $TEST_HOME/projects/alive
+zombie personal $TEST_HOME/projects/zombie
+REGEOF
+
+  run _cdev-healthcheck
+  [ "$status" -eq 0 ]
+
+  [ -f "$CURL_LOG" ]
+  local calls
+  calls=$(wc -l < "$CURL_LOG")
+  [ "$calls" -eq 1 ]
+  grep -q "'zombie'" "$CURL_LOG"
   ! grep -q "'alive'" "$CURL_LOG"
 }

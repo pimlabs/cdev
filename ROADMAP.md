@@ -314,6 +314,38 @@ subcommand.
       `systemctl is-enabled`'s exit code alone can't tell "disabled" from
       "never installed" apart, only the actual stdout can.
 
+Found live on a VPS, 19 August 2026, the same day as the two tracks above:
+`cdev <new-name> work <new-dir>` for a genuinely new project just kept
+showing a bare tmux `[exited]`, no diagnostic, even though `cdev` had
+already been taught to explain exactly this failure. Root cause: `tmux
+has-session` only says a session exists, not that its command is still
+running. A pane whose command died (crash, or here, an untrusted directory)
+but stayed open under `remain-on-exit` still "has" a session under that
+name, so the existing untrusted-workspace diagnostic, which only fired when
+the session disappeared entirely, never ran, `_cdev-ensure` thought the
+session was already up and never recreated it, and `_cdev-attach` reattached
+straight to the same corpse every time.
+
+- [x] Added `_cdev-session-alive`, checking `#{pane_dead}` in addition to
+      `has-session`. `_cdev-ensure`, `_cdev-attach`'s liveness poll, and
+      `_cdev-healthcheck` all use it now instead of the bare check.
+- [x] `_cdev-ensure` kills a same-named session left in that dead state
+      before creating a fresh one; `tmux new-session` would otherwise fail
+      outright with "duplicate session" against the leftover.
+- [x] `_cdev-attach` now runs the trust step itself and retries once when
+      the first attempt dies, instead of only printing a fix command. Raised
+      directly by the user mid-fix: "naturalnya kan memang user akan pake
+      command itu buat di directory baru, harusnya pembuatan directory pun
+      dan juga trusting directory menjadi bagian dari fitur cdev ini." Also
+      creates `dir` first if it's missing, tmux refuses a working directory
+      that doesn't exist, and a brand new project is exactly the normal case
+      for this command, not an edge case to special-case around.
+- [x] `_cdev-attach`'s poll tries/interval are now overridable via
+      `CDEV_POLL_TRIES`/`CDEV_POLL_INTERVAL`, `test_helper.bash` sets both to
+      run instantly. The retry above doubled the real wall-clock cost of
+      every existing test that exercises a session that never comes alive
+      (one file alone went from 40s to 14.5s once fixed).
+
 ## Bigger scale (high effort, changes project philosophy)
 
 This moves cdev from a small, predictable single-box tool toward a small

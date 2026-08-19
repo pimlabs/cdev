@@ -7,7 +7,7 @@
 # `cdev healthcheck` the same way a human would, by the binary's absolute
 # path (%h/.local/bin/cdev).
 
-CDEV_VERSION="0.6.0"
+CDEV_VERSION="0.7.0"
 CDEV_REGISTRY="$HOME/.cdev-sessions"
 CDEV_REGISTRY_LOCK="$CDEV_REGISTRY.lock"
 CDEV_REPO="${CDEV_REPO:-pimlabs/cdev}"
@@ -61,6 +61,21 @@ _cdev-ensure-append() {
     echo "$name $account $dir" >> "$CDEV_REGISTRY"
 }
 
+# True (exit 0) only when the tmux session exists AND its pane's command is
+# still running, not exited-but-held-open by remain-on-exit. A session whose
+# command already died (a crash, or the common case, an untrusted-workspace
+# startup failure) can still "have" a session as far as `tmux has-session` is
+# concerned, so a bare has-session check treats a dead leftover exactly like
+# a healthy one: _cdev-ensure skipped recreating it, and _cdev-attach
+# reattached straight to the same dead pane, with none of the
+# untrusted-workspace diagnostic below ever running, because that diagnostic
+# only fires when the session disappears entirely, which a remain-on-exit
+# pane never does, it just sits there showing tmux's own bare "[exited]".
+_cdev-session-alive() {
+  tmux has-session -t "$1" 2>/dev/null || return 1
+  [ "$(tmux display-message -t "$1" -p '#{pane_dead}' 2>/dev/null)" != "1" ]
+}
+
 # Create the tmux + Remote Control session if it doesn't already exist, and
 # record it in the registry. Does not attach, so it is safe to call with no
 # terminal attached, which is what the boot path depends on.
@@ -70,6 +85,20 @@ _cdev-ensure() {
   local dir="${3:-$HOME/projects/$name}"
   local config_dir
   config_dir=$(_cdev-config-dir "$account")
+
+  # tmux refuses to start a session whose working directory doesn't exist,
+  # and the natural way to use `cdev <name> [account] [dir]` is exactly for
+  # a brand new project that has no directory yet, so create it rather than
+  # fail and make the user do this by hand first.
+  mkdir -p "$dir"
+
+  # A same-named session that exists but is dead blocks `new-session` below
+  # with "duplicate session", so it has to be cleared first, not just
+  # ignored, or this would silently no-op forever on a session nobody can
+  # actually use.
+  if tmux has-session -t "$name" 2>/dev/null && ! _cdev-session-alive "$name"; then
+    tmux kill-session -t "$name" 2>/dev/null
+  fi
 
   if ! tmux has-session -t "$name" 2>/dev/null; then
     # Passed as separate argv items, plus -e for the env var, rather than one
@@ -114,6 +143,22 @@ _cdev-init() {
   ( cd "$dir" && CLAUDE_CONFIG_DIR="$config_dir" claude )
 }
 
+# Poll up to 3s (6 tries * 0.5s, both overridable, tests shrink them to run
+# fast) for $1 to come alive. tmux create is async: `new-session -d` returns
+# as soon as the session exists, not once claude has actually started inside
+# it, so checking once immediately after would misdiagnose a slow/cold-start
+# VPS as a dead session. Shared by _cdev-attach's first attempt and its
+# trust-step retry below, rather than duplicating the loop.
+_cdev-wait-for-alive() {
+  local name="$1" tries=0
+  local max_tries="${CDEV_POLL_TRIES:-6}" interval="${CDEV_POLL_INTERVAL:-0.5}"
+  until _cdev-session-alive "$name" || [ "$tries" -ge "$max_tries" ]; do
+    sleep "$interval"
+    tries=$((tries + 1))
+  done
+  _cdev-session-alive "$name"
+}
+
 # Interactive entry point: log the account in first if needed, ensure the
 # session exists, then attach to it. Reached via bare `cdev <name> [account]
 # [dir]` (the default action for any word that isn't a reserved subcommand),
@@ -134,27 +179,30 @@ _cdev-attach() {
   [ -d "$config_dir" ] || _cdev-init "$account" "$dir"
 
   local was_running=0
-  tmux has-session -t "$name" 2>/dev/null && was_running=1
+  _cdev-session-alive "$name" && was_running=1
   _cdev-ensure "$name" "$account" "$dir"
 
   # Only pay for the liveness check on a session this call actually created.
   # A session that was already up cannot be failing at spawn time, so
   # checking before every reattach would tax the common case for nothing.
-  # Poll instead of one fixed sleep: a slow/cold-start VPS can take longer
-  # than a single early check to get past claude's own startup, and a blind
-  # 1s sleep would misdiagnose that as an untrusted-directory failure. The
-  # printed fix is shell-quoted so it survives copy-paste.
-  if [ "$was_running" -eq 0 ]; then
-    local tries=0
-    until tmux has-session -t "$name" 2>/dev/null || [ "$tries" -ge 6 ]; do
-      sleep 0.5
-      tries=$((tries + 1))
-    done
-    if ! tmux has-session -t "$name" 2>/dev/null; then
-      echo "Session '$name' isn't running, it most likely exited immediately"
-      echo "because account '$account' isn't trusted in '$dir' yet."
-      echo "Fix: cd '$dir' && CLAUDE_CONFIG_DIR='$config_dir' claude"
-      echo "Accept the trust prompt, exit, then retry cdev."
+  if [ "$was_running" -eq 0 ] && ! _cdev-wait-for-alive "$name"; then
+    # `cdev <name> [account] [dir]` is exactly how a brand new project gets
+    # started, and the most common reason a first attempt dies immediately
+    # is that `$dir` itself was never trusted under `$account`, trust is
+    # saved per-directory, not per-account (see _cdev-init above), so an
+    # account that already has other trusted projects still hits this on a
+    # new one. Rather than hand the user a command to run by hand and retry
+    # cdev themselves, run that same one-time login/trust step here, scoped
+    # to $dir, and retry once automatically.
+    echo "Session '$name' isn't running, most likely because '$dir' hasn't"
+    echo "been trusted under account '$account' yet. Opening a one-time"
+    echo "trust step there now, accept the prompt and exit to continue..."
+    ( cd "$dir" && CLAUDE_CONFIG_DIR="$config_dir" claude )
+
+    _cdev-ensure "$name" "$account" "$dir"
+    if ! _cdev-wait-for-alive "$name"; then
+      echo "Still not starting after that, something else is wrong. Check"
+      echo "by hand: cd '$dir' && CLAUDE_CONFIG_DIR='$config_dir' claude"
       return 1
     fi
   fi
@@ -320,8 +368,12 @@ _cdev-healthcheck() {
 
   while read -r name account _dir; do
     [ -z "$name" ] && continue
-    if ! tmux has-session -t "$name" 2>/dev/null; then
-      message="cdev: session '$name' (account $account, box $host) disappeared unexpectedly at $now UTC. Registry still lists it; run 'cdev status' to confirm, or 'cdev $name' to respawn."
+    # Not bare has-session: a crashed pane held open by remain-on-exit still
+    # "has" a session under this name, has-session alone would never catch
+    # it, exactly the gap that let a dead session go unnoticed through a
+    # plain reattach too, see _cdev-session-alive above.
+    if ! _cdev-session-alive "$name"; then
+      message="cdev: session '$name' (account $account, box $host) is no longer running (crashed or exited) as of $now UTC. Registry still lists it; run 'cdev status' to confirm, or 'cdev $name' to respawn."
       # A webhook that is down is not a reason to skip the remaining
       # sessions, and its response body is noise in the journal every 5
       # minutes, so the call is silenced and its failure swallowed.

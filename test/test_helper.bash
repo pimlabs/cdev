@@ -22,6 +22,14 @@ stub_bin_dir() {
   STUB_BIN="$(mktemp -d)"
   PATH="$STUB_BIN:$PATH"
   write_stub flock 'exit 0'
+
+  # _cdev-attach's session-liveness poll defaults to 6 tries * 0.5s (3s) in
+  # production, and it retries once, so any test exercising a session that
+  # never comes alive would otherwise burn up to 6s real time per test. Both
+  # knobs are overridable (see _cdev-wait-for-alive in cdev.sh); one try, no
+  # sleep, still exercises the exhausted-retry code path, just instantly.
+  export CDEV_POLL_TRIES=1
+  export CDEV_POLL_INTERVAL=0
 }
 
 # write_stub <name> <body>

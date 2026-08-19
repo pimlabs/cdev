@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-19
+
+### Added
+
+- `cdev <name> [account] [dir]` now creates `dir` if it doesn't exist yet, tmux refuses a session whose working directory is missing, and the natural way to use this command is exactly for a brand new project that has no directory at all
+- `cdev <name> [account] [dir]` now recovers automatically when the first attempt dies immediately, most commonly because `dir` was never trusted under an account that already has other trusted projects (trust is saved per-directory, not per-account). It opens a one-time trust step scoped to `dir` and retries once, instead of printing a fix command for the user to copy and re-run `cdev` themselves. Only falls back to that manual message if the retry also fails
+
+### Fixed
+
+- A session whose command already died (a crash, or the common case, an untrusted directory) but stayed held open by `remain-on-exit` was indistinguishable from a healthy one to `tmux has-session` alone, since the session object itself hadn't gone anywhere. `_cdev-ensure` used to skip recreating it, `_cdev-attach` reattached straight back to the same dead pane with no diagnostic (a bare tmux `[exited]`, since the existing untrusted-workspace diagnostic only ever fired when the session disappeared entirely), and `_cdev-healthcheck` never flagged it as missing either. All three now check the pane's actual liveness (`#{pane_dead}`), not just whether tmux still has a session by that name
+
 ## [0.6.0] - 2026-08-19
 
 ### Added
@@ -90,7 +101,8 @@ old `cdev-status`, `cdev-kill`, `cdev-init`, `cdev-accounts`, and
 - `_cdev-ensure`'s dedup check now passes `--` to grep. Without it a registry line starting with a dash was read by grep as its own options, so the check failed and the line was appended again on every call
 - `_cdev-restore` iterates over a snapshot of the registry rather than the live file. Combined with the dedup bug above, reading the file while `_cdev-ensure` appended to it turned the loop into one that never ended and a registry that grew without limit (a real run reached 12,657 identical lines)
 
-[Unreleased]: https://github.com/pimlabs/cdev/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/pimlabs/cdev/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/pimlabs/cdev/releases/tag/v0.7.0
 [0.6.0]: https://github.com/pimlabs/cdev/releases/tag/v0.6.0
 [0.5.0]: https://github.com/pimlabs/cdev/releases/tag/v0.5.0
 [0.4.0]: https://github.com/pimlabs/cdev/releases/tag/v0.4.0
