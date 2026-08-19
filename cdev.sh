@@ -7,7 +7,7 @@
 # `cdev healthcheck` the same way a human would, by the binary's absolute
 # path (%h/.local/bin/cdev).
 
-CDEV_VERSION="0.5.0"
+CDEV_VERSION="0.6.0"
 CDEV_REGISTRY="$HOME/.cdev-sessions"
 CDEV_REGISTRY_LOCK="$CDEV_REGISTRY.lock"
 CDEV_REPO="${CDEV_REPO:-pimlabs/cdev}"
@@ -654,13 +654,25 @@ EOF
 # that is merely inactive, so it gets `|| true`: the word it prints is the
 # answer we want, not an error. Factored out so this handling only needs to
 # be right in one place as more units get added.
+# is-enabled exits non-zero for "disabled" just as much as for a unit that
+# was never installed, the exit code alone can't tell the two apart. Only
+# empty stdout means "no such unit", "disabled" still prints the word
+# "disabled" even though the command itself failed. Capturing output
+# unconditionally, instead of gating on the exit code, is what makes that
+# distinction visible: the previous version treated every non-zero exit as
+# "not installed" and silently misreported a disabled-but-installed unit as
+# though cdev had never set it up at all.
 _cdev-doctor-unit() {
   local unit="$1" enabled active
-  if enabled=$(systemctl --user is-enabled "$unit" 2>/dev/null); then
-    active=$(systemctl --user is-active "$unit" 2>/dev/null) || true
-    echo "$unit: $enabled, ${active:-unknown}"
-  else
+  enabled=$(systemctl --user is-enabled "$unit" 2>/dev/null)
+  if [ -z "$enabled" ]; then
     echo "$unit: not installed"
+    return
+  fi
+  active=$(systemctl --user is-active "$unit" 2>/dev/null) || true
+  echo "$unit: $enabled, ${active:-unknown}"
+  if [ "$enabled" = "disabled" ]; then
+    echo "  Not enabled, run: systemctl --user enable $unit"
   fi
 }
 
@@ -719,6 +731,36 @@ _cdev-doctor() {
 
   echo ""
 
+  # Sessions started some other way than cdev (a bare `tmux new-session`, or
+  # a registry line lost to a manual edit) are invisible to `cdev restore`:
+  # nothing says they should come back after a reboot, so they simply don't,
+  # with no warning beforehand, they just look fine in `cdev status` right up
+  # until the box actually restarts. Adopting them here is the same
+  # idempotent append `_cdev-ensure` already does on every attach, safe to
+  # run on every doctor call rather than gated behind a prompt or a subcommand
+  # of its own. Account and dir are best-effort guesses, CDEV_ACCOUNT from
+  # the session's own tmux environment, dir from its current pane path, since
+  # an orphan session was never told either explicitly the way `cdev <name>`
+  # tells `_cdev-ensure`.
+  if command -v tmux >/dev/null 2>&1; then
+    local live_sessions
+    live_sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null)
+    if [ -n "$live_sessions" ]; then
+      local s acct dir
+      while read -r s; do
+        [ -z "$s" ] && continue
+        if [ -f "$CDEV_REGISTRY" ] &&
+          awk -v name="$s" '$1 == name { found = 1 } END { exit !found }' "$CDEV_REGISTRY"; then
+          continue
+        fi
+        acct=$(tmux show-environment -t "$s" CDEV_ACCOUNT 2>/dev/null | cut -d= -f2)
+        dir=$(tmux display-message -t "$s" -p '#{pane_current_path}' 2>/dev/null)
+        _cdev-registry-locked _cdev-ensure-append "$s" "${acct:-personal}" "${dir:-$HOME/projects/$s}"
+        echo "Adopted orphan session '$s' into the registry (account ${acct:-personal}), it will now survive 'cdev restore'."
+      done <<< "$live_sessions"
+    fi
+  fi
+
   # Absent systemd and an uninstalled unit are two different answers, so
   # check for the binary once rather than reporting "not installed" for
   # every unit on a box that could never have installed them. `is-active`
@@ -740,6 +782,7 @@ _cdev-doctor() {
       echo "loginctl linger: enabled"
     else
       echo "loginctl linger: disabled"
+      echo "  Sessions won't survive a reboot without it, run: sudo loginctl enable-linger $(whoami)"
     fi
   else
     echo "loginctl linger: unknown"
@@ -768,7 +811,9 @@ Subcommands (also reserved, can't be used as a bare project name):
   init <account> <dir>     One-time interactive login/trust setup for an
                            account.
   accounts                 List configured account config directories.
-  doctor                   Show install version and systemd/linger health.
+  doctor                   Show install version and systemd/linger health,
+                           adopt orphaned tmux sessions into the registry,
+                           and print a fix command for anything disabled.
   upgrade                  Install the latest release. For installs made with
                            the one-line curl command, which have no checkout
                            to git pull.
