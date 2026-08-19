@@ -19,13 +19,16 @@ jobs:
     # hangs (an apt mirror stall killed one run for 4 hours on 19 August
     # 2026, on a private repo, where that time is billable) keeps a runner
     # tied up and the meter running for the whole 6 hours unless someone
-    # notices and cancels it by hand.
+    # notices and cancels it by hand. Kept even after removing the apt-get
+    # step below that actually caused that stall, this is a general backstop
+    # for whatever step hangs next, not a fix aimed at one specific command.
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install shellcheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
-
+      # No install step: ubuntu-latest ships shellcheck preinstalled (see
+      # actions/runner-images), so there is nothing to fetch here. This is
+      # also what removed the apt-get call that hung for 4 hours above,
+      # rather than only capping how long a repeat could run.
       - name: Run shellcheck
         run: find . -name "*.sh" -exec shellcheck {} +
