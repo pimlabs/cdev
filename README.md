@@ -173,7 +173,7 @@ needed, then attach.
 
 | Command | Does |
 |---|---|
-| `cdev <name> [account] [dir]` | Create (if new) and attach to a session. Account defaults to `personal`, maps to `~/.claude-<account>`. Logs the account in first if it never has been. If the session exits immediately because the account isn't trusted in `dir` yet, `cdev` now detects that and prints the fix directly, instead of leaving a bare tmux `[exited]` with no explanation. `cdev open <name> [account] [dir]` and the older `cdev -- <name> [account] [dir]` are explicit equivalents, needed when `<name>` collides with a reserved subcommand word below. |
+| `cdev <name> [account] [dir]` | Create (if new) and attach to a session. Account defaults to `personal`, maps to `~/.claude-<account>`. `dir` is created if it doesn't exist yet. Logs the account in first if it never has been. If the session exits immediately, most commonly because `dir` has never been trusted under that account, `cdev` opens a one-time trust step there and retries once automatically, instead of leaving a bare tmux `[exited]` or a fix command to run by hand. `cdev open <name> [account] [dir]` and the older `cdev -- <name> [account] [dir]` are explicit equivalents, needed when `<name>` collides with a reserved subcommand word below. |
 | `cdev status` | List running sessions with their account, attach state, and session uptime. There is no login/credential column: cdev does not read Claude Code's local credential expiry, so it cannot tell a logged-in session from an expired one. |
 | `cdev kill <name>` | Stop a session and remove it from the reboot registry. |
 | `cdev init <account> <dir>` | One-time interactive login for an account, run inside `<dir>` so the trust dialog applies to that project, not `$HOME`. No-ops if it's already logged in. Runs automatically from `cdev` when needed. |
@@ -292,19 +292,17 @@ doesn't exist, the health check exits immediately and does nothing.
 
 ## Known issues
 
-- **`Error: Workspace not trusted`** when a fresh account tries to start
-  `claude remote-control`: Claude Code's first-run trust dialog is never
-  saved for a home directory, on purpose. `cdev` now detects this failure
-  automatically (the session exits immediately, `cdev` notices and prints
-  the fix instead of leaving a bare tmux `[exited]`). `cdev init` still runs
-  the login step inside the target project directory for the same reason,
-  if it instead ran wherever the SSH session happened to land (typically
-  `$HOME`), login would "succeed" but the project directory would still come
-  up untrusted the moment `remote-control` tried to start there. An account
-  whose config dir already got created by a broken earlier attempt won't get
-  walked through `cdev init` again since it looks already-initialized. Fix
-  by hand once: `cd <dir> && CLAUDE_CONFIG_DIR=~/.claude-<account> claude`,
-  accept the trust prompt, exit, then retry `cdev`.
+- **`Error: Workspace not trusted`** when `claude remote-control` starts in a
+  directory that has never been trusted under that account: Claude Code's
+  trust dialog is saved per-directory, not per-account, so this is the
+  normal, expected first run for any brand new project, `cdev <name>
+  [account] [dir]` is exactly how a new project gets started. `cdev` handles
+  it automatically now: it detects the session dying immediately, opens a
+  one-time login/trust step scoped to that directory, and retries once, no
+  manual fix command to copy or `cdev` to re-run by hand. If it still isn't
+  running after that retry, something else is wrong, `cdev` prints the same
+  command to check by hand: `cd <dir> && CLAUDE_CONFIG_DIR=~/.claude-<account>
+  claude`.
 - **Silent stalls on expired login**: a background or Remote Control session
   that outlives its login just stops making progress, no error, no
   notification, it goes quiet mid-task. If a `cdev` session looks idle after

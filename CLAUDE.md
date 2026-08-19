@@ -42,14 +42,25 @@ registry or this machine's systemd state.
 bats test/            # needs bats-core installed, it is not vendored here
 ```
 
-- `test/cdev_ensure.bats` registry dedup in `_cdev-ensure`
+- `test/cdev_ensure.bats` registry dedup in `_cdev-ensure`, `_cdev-session-alive`
+  distinguishing a dead-but-`remain-on-exit`-held pane from a genuinely live
+  one, `_cdev-ensure` killing and recreating a session left in that dead
+  state, and that it creates the session directory when it doesn't exist
 - `test/cdev_kill.bats` registry line removal in `_cdev-kill` (the `cdev kill` subcommand)
 - `test/account_config_dir.bats` account to `CLAUDE_CONFIG_DIR` mapping
 - `test/install_shell_detection.bats` rc file `install.sh` falls back to for
   its `PATH` line when `~/.local/bin` isn't already on `PATH`
 - `test/cdev_restore_healthcheck.bats` the registry replay in `_cdev-restore`
   (including that it continues past a failing session) and the opt-in
-  webhook gate in `_cdev-healthcheck`
+  webhook gate in `_cdev-healthcheck`, including that it also fires for a
+  session held open in a dead state by `remain-on-exit`, not just one that
+  vanished outright
+- `test/cdev_attach_recovery.bats` `_cdev-attach`'s automatic trust-step
+  retry when a session dies immediately (stateful tmux/claude stubs play out
+  "created dead, trust step runs, recreated alive" rather than a canned
+  single response), that it gives up cleanly if the retry also fails, and
+  that an already-alive session skips the retry path entirely, never
+  launching `claude` at all
 - `test/dispatcher_flags.bats` flag handling in the `cdev()` dispatcher, and
   the registry-corruption chain it once caused (see the file's own header)
 - `test/uninstall.bats` `cdev uninstall`, including that its conservative
@@ -113,7 +124,17 @@ more: `cdev` is the only function in the file without the underscore
 prefix.
 
 - `_cdev-attach` holds the login-then-ensure-then-tmux-attach logic that used
-  to live directly in `cdev`.
+  to live directly in `cdev`. If the first attempt dies immediately, most
+  commonly because `dir` was never trusted under an account that is already
+  logged in elsewhere (trust is per-directory, not per-account, see
+  `_cdev-init` below), it now opens that one-time trust step itself, scoped
+  to `dir`, and retries `_cdev-ensure` once automatically, rather than
+  printing a fix command and making the user copy it and re-run `cdev`
+  themselves. Only gives up, with a message pointing at the same manual
+  check, if the retry also fails. Found and fixed the same day as the
+  `_cdev-session-alive` bug below, live on a VPS: a brand new project
+  directory is exactly the case `cdev <name> [account] [dir]` exists for, so
+  this was the common case failing silently, not an edge case.
 - `_cdev-latest-tag` resolves the newest published release by following the
   redirect that GitHub's `/releases/latest` issues to `/releases/tag/<tag>`,
   read with `curl -o /dev/null -w '%{url_effective}'`, then validates the
@@ -167,10 +188,33 @@ prefix.
   installed, so the old code, which gated on the exit code alone, silently
   misreported a disabled-but-installed unit as though cdev had never set it
   up at all.
+- `_cdev-session-alive` is the fix for a real bug found on a live VPS: `tmux
+  has-session` only tells you a session exists, not that its command is
+  still running. A pane whose command already died (crash, or the common
+  case, an untrusted directory) but is held open by `remain-on-exit` still
+  "has" a session under that name, so a bare `has-session` check reads a
+  dead leftover exactly like a healthy one. `_cdev-ensure` used to skip
+  recreating it, `_cdev-attach` used to reattach straight to the same dead
+  pane (a bare tmux `[exited]`, no diagnostic, since that diagnostic only
+  ever fired when the session disappeared entirely, which a
+  `remain-on-exit` pane never does), and `_cdev-healthcheck` used to never
+  flag it as missing either. `_cdev-session-alive` checks `#{pane_dead}` in
+  addition to `has-session`, and all three now call it instead of the bare
+  check. `_cdev-wait-for-alive` wraps the polling loop (used by
+  `_cdev-attach`'s first attempt and its trust-step retry) around it, tries
+  and interval overridable via `CDEV_POLL_TRIES`/`CDEV_POLL_INTERVAL` so
+  tests don't pay the real 3-second wait, `test/test_helper.bash`'s
+  `stub_bin_dir` sets both to run instantly.
 - `_cdev-ensure` creates the tmux session and records it in the registry. It
-  is also the one function called non-interactively, so it must stay safe to
-  run with no attached terminal (no prompts, no blocking reads), since the
-  boot path depends on that.
+  creates `dir` first if it does not exist yet (tmux refuses a working
+  directory that is missing, and the natural way to use `cdev <name>
+  [account] [dir]` is for a brand new project that has no directory at
+  all), and kills a same-named session left behind with a dead pane before
+  creating a fresh one, `tmux new-session` would otherwise fail with
+  "duplicate session" against the leftover. It is also the one function
+  called non-interactively, so it must stay safe to run with no attached
+  terminal (no prompts, no blocking reads), since the boot path depends on
+  that.
 - `_cdev-restore` replays every line of the registry through `_cdev-ensure`.
   This is what the boot path runs. `cdev.sh` can still be sourced directly
   (tests do this, and nothing stops a user from doing the same), and `set -e`
@@ -181,9 +225,12 @@ prefix.
   session does not block the others, and returns 1 at the end if any failed,
   so systemd still marks the unit failed rather than reporting a clean boot.
 - `_cdev-healthcheck` is a separate, opt-in non-interactive check. It
-  compares the registry against live tmux sessions and reports any session
-  that disappeared without going through `cdev kill`. It is silent and a
-  no-op unless `~/.cdev-notify` exists.
+  compares the registry against live tmux sessions (via `_cdev-session-alive`,
+  not bare `has-session`, so a crashed session held open by
+  `remain-on-exit` is caught too, not just one that vanished outright) and
+  reports any session that is no longer actually running without going
+  through `cdev kill`. It is silent and a no-op unless `~/.cdev-notify`
+  exists.
 
 Both the boot path and the periodic health check are subcommands of `cdev`
 rather than standalone scripts, keeping the registry, locking, and
