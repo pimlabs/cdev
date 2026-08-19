@@ -1,9 +1,15 @@
 #!/usr/bin/env bats
-# uninstall.sh, run against a temp HOME with tmux/systemctl/sudo/loginctl
+# `cdev uninstall`, run against a temp HOME with tmux/systemctl/sudo/loginctl
 # stubbed, so nothing touches this machine's real registry, units, or linger
 # state. The conservative defaults are the point of most of these: leaving
 # live sessions and user data alone is behavior, not an oversight, so it is
 # tested rather than left to be "cleaned up" by a later change.
+#
+# This used to be its own uninstall.sh, invoked as a subprocess. Folded into
+# cdev.sh as a subcommand, which changes what "safe" means here: every path
+# through _cdev-uninstall must `return`, never `exit`, since it now runs
+# inside the user's sourced, interactive shell rather than a script that was
+# always going to end anyway. That is exercised directly below.
 
 load test_helper
 
@@ -48,9 +54,14 @@ esac
   export TMUX_KILL_LOG
 }
 
+# Sources cdev.sh fresh in a subprocess and calls `cdev uninstall`, rather
+# than calling the function directly in bats' own process. That is what
+# makes the exit-vs-return test below meaningful: if _cdev-uninstall ever
+# used `exit` instead of `return`, this subprocess would terminate early
+# instead of reaching the marker printed after it.
 run_uninstall() {
   run env HOME="$TEST_HOME" PATH="$PATH" TMUX_KILL_LOG="${TMUX_KILL_LOG:-}" \
-    bash "$CDEV_ROOT/uninstall.sh" "$@"
+    bash -c 'source "$0" && cdev uninstall "$@"' "$CDEV_ROOT/cdev.sh" "$@"
 }
 
 @test "uninstall removes the installed dotfile and the systemd unit files" {
@@ -140,7 +151,8 @@ run_uninstall() {
   export LOGINCTL_LOG
 
   run env HOME="$TEST_HOME" PATH="$PATH" LOGINCTL_LOG="$LOGINCTL_LOG" \
-    TMUX_KILL_LOG="$TMUX_KILL_LOG" bash "$CDEV_ROOT/uninstall.sh"
+    TMUX_KILL_LOG="$TMUX_KILL_LOG" \
+    bash -c 'source "$0" && cdev uninstall' "$CDEV_ROOT/cdev.sh"
   [ "$status" -eq 0 ]
 
   run grep -c 'disable-linger' "$LOGINCTL_LOG"
@@ -171,6 +183,25 @@ run_uninstall() {
   rm -rf "$TEST_HOME"
   TEST_HOME="$(mktemp -d)"
 
-  run env HOME="$TEST_HOME" PATH="$PATH" bash "$CDEV_ROOT/uninstall.sh"
+  run env HOME="$TEST_HOME" PATH="$PATH" \
+    bash -c 'source "$0" && cdev uninstall' "$CDEV_ROOT/cdev.sh"
   [ "$status" -eq 0 ]
+}
+
+# The one this file exists to catch: as a subcommand, `cdev uninstall` runs
+# inside the caller's shell rather than as a script process that was always
+# going to end. If any path through it used `exit` instead of `return`, the
+# marker below would never print, and this test would see it missing rather
+# than see a failure message, which is exactly the kind of bug that is easy
+# to introduce and easy to miss without a test forcing the point.
+@test "uninstall returns rather than exits, the calling shell survives" {
+  stub_tmux_alive
+  run env HOME="$TEST_HOME" PATH="$PATH" TMUX_KILL_LOG="$TMUX_KILL_LOG" \
+    bash -c '
+      source "$0"
+      cdev uninstall >/dev/null
+      echo "SURVIVED_UNINSTALL:$?"
+    ' "$CDEV_ROOT/cdev.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SURVIVED_UNINSTALL:0"* ]]
 }

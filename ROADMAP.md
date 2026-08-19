@@ -50,6 +50,11 @@ Ships with:
 - [x] Every internal helper renamed with a leading underscore
       (`_cdev-status`, `_cdev-kill`, `_cdev-init`, and so on), so `cdev` is
       the sole function meant to be called directly.
+- [x] `uninstall.sh` folded into `cdev uninstall`. It shipped as its own
+      script first, then moved once the one-line-install track above made
+      the asymmetry obvious: install has to work before `cdev` exists on
+      the box, so it must stand alone, but uninstall only ever runs after
+      `cdev` is already there, so it never needed to be a separate file.
 
 A pre-merge review pass also found and fixed 3 issues before this track
 shipped: a shell-injection path in the tmux launch command, a `cdev-kill`

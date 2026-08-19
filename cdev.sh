@@ -344,6 +344,171 @@ _cdev-upgrade() {
   return "$status"
 }
 
+# Reverse what install.sh did to this box: the systemd units, the source
+# line in the shell rc file, and the ~/.cdev.sh copy.
+#
+# A subcommand rather than its own script, unlike install.sh, because of when
+# each one runs. install.sh has to work before cdev exists on the box, so it
+# must stand alone. Uninstall only ever runs after cdev is installed, so the
+# code is already here. That also means it needs no network, which matters:
+# people usually remove something because it is misbehaving.
+#
+# Note every failure path returns rather than exits. This file is sourced
+# into the user's interactive shell, so an `exit` here would close their
+# terminal.
+#
+# Deliberately conservative by default, since the things this could destroy
+# are the things people actually care about:
+#   - running tmux sessions are left alone. Uninstalling the launcher is not
+#     a reason to kill live Claude sessions and lose whatever they were in
+#     the middle of. Pass --kill-sessions to stop them too.
+#   - ~/.cdev-sessions and ~/.cdev-notify are kept. The registry is a record
+#     of your projects and the notify file is your webhook config, so both
+#     survive a reinstall. Pass --purge to delete them.
+#   - linger stays enabled. install.sh turned it on with sudo, but other
+#     systemd --user services may depend on it by now, and turning it off
+#     would stop them silently. The command to undo it is printed instead.
+_cdev-uninstall() {
+  local purge=0 kill_sessions=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --purge) purge=1 ;;
+      --kill-sessions) kill_sessions=1 ;;
+      -h|--help)
+        cat <<'EOF'
+Usage: cdev uninstall [--kill-sessions] [--purge]
+
+Removes the cdev install from this box: systemd units, the source line in
+the shell rc file, and ~/.cdev.sh.
+
+  --kill-sessions  Also stop every running tmux session in the registry.
+                   Off by default, uninstalling should not kill live work.
+  --purge          Also delete ~/.cdev-sessions (the registry) and
+                   ~/.cdev-notify (the webhook URL). Off by default, both
+                   survive so a reinstall picks up where you left off.
+
+Linger is never disabled, other systemd --user services may rely on it.
+EOF
+        return 0
+        ;;
+      *)
+        echo "cdev uninstall: unknown option '$1'" >&2
+        echo "Run 'cdev uninstall --help' for usage." >&2
+        return 1
+        ;;
+    esac
+    shift
+  done
+
+  local -a live_sessions=()
+  local name
+  if command -v tmux >/dev/null 2>&1 && [ -f "$CDEV_REGISTRY" ]; then
+    local _account _dir
+    while read -r name _account _dir; do
+      [ -z "$name" ] && continue
+      if tmux has-session -t "$name" 2>/dev/null; then
+        live_sessions+=("$name")
+      fi
+    done < "$CDEV_REGISTRY"
+  fi
+
+  if [ "${#live_sessions[@]}" -gt 0 ]; then
+    if [ "$kill_sessions" -eq 1 ]; then
+      for name in "${live_sessions[@]}"; do
+        tmux kill-session -t "$name" 2>/dev/null && echo "Killed session '$name'." ||
+          echo "Could not kill session '$name'."
+      done
+    else
+      echo "Leaving ${#live_sessions[@]} running session(s) alone: ${live_sessions[*]}"
+      echo "They keep running under tmux. Re-run with --kill-sessions to stop them,"
+      echo "or attach with 'tmux attach -t <name>' once cdev is gone."
+    fi
+  fi
+
+  local unit_dir="$HOME/.config/systemd/user"
+  local -a units=(cdev-restore.service cdev-healthcheck.service cdev-healthcheck.timer)
+  local unit
+
+  if command -v systemctl >/dev/null 2>&1; then
+    # `disable --now` also stops a running unit. Guarded because a unit that
+    # was never installed, or a box where the user systemd bus is not
+    # reachable, must not stop the rest of the uninstall.
+    for unit in "${units[@]}"; do
+      systemctl --user disable --now "$unit" >/dev/null 2>&1 || true
+    done
+    echo "Disabled systemd units."
+  else
+    echo "No systemd on this box, skipping unit teardown."
+  fi
+
+  for unit in "${units[@]}"; do
+    rm -f "$unit_dir/$unit"
+  done
+  echo "Removed unit files from $unit_dir."
+
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+  fi
+
+  # Clean both rc files, not just the one matching $SHELL today. install.sh
+  # picks the rc file by the shell active at install time, and someone who
+  # has switched shells since would otherwise be left with a dangling source
+  # line in the other file, which errors on every new shell once ~/.cdev.sh
+  # is gone.
+  # The single quotes are deliberate, the same way install.sh writes this
+  # line: the literal string $HOME is what sits in the rc file, so that is
+  # what has to be matched, not its expansion.
+  # shellcheck disable=SC2016
+  local source_line='source "$HOME/.cdev.sh"'
+  local rc grep_status
+  for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+    [ -f "$rc" ] || continue
+    grep -qxF -- "$source_line" "$rc" || continue
+
+    # grep -vF into a temp file, then replace, for the same portability
+    # reason _cdev-kill does it: `sed -i` takes a mandatory backup suffix on
+    # BSD sed and none on GNU sed. Status 1 is not a failure, it means
+    # nothing was selected, which is exactly what an rc file holding nothing
+    # but the source line produces, and that empty result is the correct new
+    # contents. Only status 2 and up is a real error, and there the file is
+    # left alone rather than truncated.
+    grep_status=0
+    grep -vxF -- "$source_line" "$rc" > "$rc.cdev-tmp" || grep_status=$?
+    if [ "$grep_status" -le 1 ]; then
+      mv "$rc.cdev-tmp" "$rc"
+      echo "Removed the cdev source line from $rc."
+    else
+      rm -f "$rc.cdev-tmp"
+      echo "Could not rewrite $rc, leaving it untouched. Remove this line by hand:" >&2
+      echo "  $source_line" >&2
+    fi
+  done
+
+  # .cdev-restore-all.sh and .cdev-healthcheck.sh are from installs predating
+  # the move to `cdev restore` / `cdev healthcheck` subcommands. Deleting
+  # ~/.cdev.sh out from under this running function is safe: the shell parsed
+  # it into memory when it was sourced and never reads the file again.
+  rm -f "$HOME/.cdev.sh" "$HOME/.cdev-restore-all.sh" "$HOME/.cdev-healthcheck.sh"
+  echo "Removed ~/.cdev.sh."
+
+  if [ "$purge" -eq 1 ]; then
+    rm -f "$CDEV_REGISTRY" "$HOME/.cdev-notify"
+    echo "Purged the registry and notify file."
+  else
+    [ -f "$CDEV_REGISTRY" ] && echo "Kept $CDEV_REGISTRY (pass --purge to delete it)."
+    [ -f "$HOME/.cdev-notify" ] && echo "Kept $HOME/.cdev-notify (pass --purge to delete it)."
+  fi
+
+  echo ""
+  echo "Uninstalled. The cdev function is still defined in this shell, open a"
+  echo "new one or run 'unset -f cdev' to clear it."
+  if command -v loginctl >/dev/null 2>&1; then
+    echo "Linger is still enabled. If nothing else on this box needs it:"
+    echo "  sudo loginctl disable-linger $(whoami)"
+  fi
+  return 0
+}
+
 # Print one line of _cdev-doctor's systemd unit report for $1, given that
 # systemctl is already known to exist. `is-active` exits non-zero for a unit
 # that is merely inactive, so it gets `|| true`: the word it prints is the
@@ -444,6 +609,9 @@ Subcommands:
   upgrade                  Install the latest release. For installs made with
                            the one-line curl command, which have no checkout
                            to git pull.
+  uninstall [flags]        Remove the cdev install from this box. Leaves live
+                           sessions running and keeps the registry unless
+                           told otherwise, see 'cdev uninstall --help'.
   restore                  Recreate every registered session. Run at boot by
                            cdev-restore.service, safe to run by hand.
   healthcheck              Report registered sessions that vanished from tmux.
@@ -488,6 +656,10 @@ cdev() {
       shift
       _cdev-upgrade "$@"
       ;;
+    uninstall)
+      shift
+      _cdev-uninstall "$@"
+      ;;
     restore)
       shift
       _cdev-restore "$@"
@@ -518,9 +690,13 @@ cdev() {
 }
 
 # Let `./cdev.sh <args>` work directly too, not only `source cdev.sh` then
-# `cdev <args>`. BASH_SOURCE[0] (this file's path) only equals $0 (the
-# running program's name) when the file is executed, not when it's sourced,
-# so this is a no-op for the installed, sourced-into-rc-file case.
-if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+# `cdev <args>`. `return` only succeeds inside a function or a sourced file,
+# so wrapping it in a subshell and checking the result is the standard,
+# reliable way to tell sourced from executed. The comparison this used to
+# do, BASH_SOURCE[0] against $0, looks equivalent but is not: anything that
+# invokes bash with an explicit $0 matching the sourced path, which a test
+# harness can do easily, makes that comparison misreport a sourced call as a
+# direct one. This is a no-op for the installed, sourced-into-rc-file case.
+if ! (return 0 2>/dev/null); then
   cdev "$@"
 fi

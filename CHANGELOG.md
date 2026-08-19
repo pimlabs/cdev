@@ -11,6 +11,8 @@
 ### Changed
 
 - `cdev doctor` now also reports the latest published release tag on GitHub, alongside the existing `$PWD` checkout comparison. Its only version check before this was against a `cdev.sh` in `$PWD`, which a curl install never has, so doctor silently skipped that check and read as up to date with no way to tell otherwise
+- `uninstall.sh` is deleted. Its logic is now `_cdev-uninstall`, reachable as the `cdev uninstall` subcommand. Behavior and every flag (`--kill-sessions`, `--purge`) are unchanged; only how you run it changed, from `./uninstall.sh` to `cdev uninstall`
+- The `./cdev.sh <args>` direct-invoke check now uses `(return 0 2>/dev/null)` instead of comparing `BASH_SOURCE[0]` to `$0`. The old comparison could misreport a sourced call as a direct one if something invoked bash with an explicit `$0` matching the sourced path, which surfaced as a real test failure once `cdev uninstall` needed to be exercised as a subcommand rather than a standalone script
 
 ## [0.2.0] - 2026-08-19
 

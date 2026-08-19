@@ -79,27 +79,30 @@ shell keeps the old functions loaded until you open a new one or re-source
 ## Uninstall
 
 ```bash
-./uninstall.sh
+cdev uninstall
 ```
 
-Run from inside the repo checkout. It reverses `install.sh`: disables and
-removes the three systemd units, strips the `source "$HOME/.cdev.sh"` line
-from both `~/.bashrc` and `~/.zshrc` (whichever one `install.sh` picked, plus
-the other, in case the shell changed since), and deletes `~/.cdev.sh`.
+It reverses `install.sh`: disables and removes the three systemd units,
+strips the `source "$HOME/.cdev.sh"` line from both `~/.bashrc` and
+`~/.zshrc` (whichever one `install.sh` picked, plus the other, in case the
+shell changed since), and deletes `~/.cdev.sh`. A subcommand rather than its
+own script, unlike `install.sh`: uninstall only ever runs after `cdev` is
+already on the box, so it needs no network and no separate file, unlike
+installing, which has to work before `cdev` exists at all.
 
 **Your running tmux sessions are not touched.** Uninstalling the launcher is
 not a reason to kill live Claude sessions, so they keep running under tmux
-and `uninstall.sh` prints how to reach them (`tmux attach -t <name>`). Pass
+and `cdev uninstall` prints how to reach them (`tmux attach -t <name>`). Pass
 `--kill-sessions` to stop them too. The registry (`~/.cdev-sessions`) and the
 webhook config (`~/.cdev-notify`) are kept by default as well, so a reinstall
 picks up where you left off, pass `--purge` to delete them. Linger is never
 disabled since other `systemd --user` services may depend on it by now,
-`uninstall.sh` prints the `sudo loginctl disable-linger` command instead of
+`cdev uninstall` prints the `sudo loginctl disable-linger` command instead of
 running it, so you can decide.
 
-The `cdev` function stays defined in whichever shell you ran `uninstall.sh`
+The `cdev` function stays defined in whichever shell you ran `cdev uninstall`
 from until you open a new one, or run `unset -f cdev` now. Run
-`./uninstall.sh --help` for the full flag list.
+`cdev uninstall --help` for the full flag list.
 
 ## Commands
 
@@ -118,13 +121,14 @@ creating) a project session.
 | `cdev upgrade` | Install the latest tagged release. For a curl-installed box (no checkout to `git pull`): downloads that release's tarball and runs its `install.sh`. No-ops with a message if you're already on the latest tag. |
 | `cdev restore` | Recreate every registered session. Run automatically at boot by `cdev-restore.service`; safe to run by hand too, it no-ops on sessions that already exist. |
 | `cdev healthcheck` | Report registered sessions that vanished from tmux without going through `cdev kill`. Run every 5 minutes by `cdev-healthcheck.timer`; silent unless `~/.cdev-notify` holds a webhook URL. |
+| `cdev uninstall` | Remove cdev from this box: systemd units, the rc file source line, `~/.cdev.sh`. See [Uninstall](#uninstall) above. |
 | `cdev version` (`--version`, `-v`) | Print the installed cdev version. |
 | `cdev help` (`--help`, `-h`) | Show usage and the subcommand list. Also what bare `cdev` prints. |
 
 A project name can't collide with a subcommand word (`status`, `kill`, `init`,
-`accounts`, `doctor`, `upgrade`, `restore`, `healthcheck`, `version`,
-`help`), the same convention `git` and `npm` use. If it does, force attach
-mode with `cdev -- <name> [account] [dir]`.
+`accounts`, `doctor`, `upgrade`, `restore`, `healthcheck`, `uninstall`,
+`version`, `help`), the same convention `git` and `npm` use. If it does,
+force attach mode with `cdev -- <name> [account] [dir]`.
 
 Must run inside `tmux` (which `cdev` handles for you), not a bare SSH shell,
 or the session dies the moment SSH disconnects. The first time `cdev` is
