@@ -109,18 +109,70 @@ About keeping the project easy to work on, not new user-facing behavior.
 - [x] Surfacing a stale install is covered by `cdev doctor` in the
       single-entrypoint track above, superseded there.
 
+## Distribution: one-line install (medium effort, design agreed)
+
+Curated 19 August 2026. Installing today means `git clone` first, which
+means a fresh VPS needs `git` before it can install a tool that otherwise
+only needs `tmux` and `curl`. The target is the pattern rustup, Homebrew,
+Bun, Deno, uv, Docker, Tailscale, and k3s all use:
+
+```
+curl -fsSL https://cdev.pimlabs.id/install | bash
+```
+
+The last three are the relevant precedent: they also need root and also
+install system services, so the fact that `install.sh` runs `sudo loginctl
+enable-linger` is not a reason to avoid this.
+
+- [ ] Make `install.sh` work in two modes. It currently copies its sibling
+      files via `$SCRIPT_DIR`, which does not exist when the script is piped
+      into bash. Piped, it should download the release tarball and install
+      from that; from a checkout it should keep working exactly as now.
+- [ ] Attach `install.sh` as a release asset, so
+      `github.com/pimlabs/cdev/releases/latest/download/install.sh` always
+      resolves to the newest release. That is what makes the front door a
+      one-time setup instead of something to update on every tag.
+- [ ] Add `cdev upgrade`. Without a checkout there is no `git pull`, so
+      there has to be a supported way to move to a newer version.
+- [ ] Change `_cdev-doctor`'s version comparison to check the latest release
+      tag on GitHub rather than a `cdev.sh` in `$PWD`. This is the part that
+      silently breaks otherwise: with no checkout the current comparison is
+      skipped and doctor reports nothing at all, which reads as "up to date".
+
+Two constraints worth writing down. The URL must resolve to a tagged
+release, never to `main`, since piping a moving branch into a shell with
+sudo access is a far bigger ask than piping a fixed one. And the DNS
+redirect from `cdev.pimlabs.id` to the GitHub URL is not a blocker: the
+installer works through the GitHub URL from day one, and the subdomain is
+a nicer front door that can be pointed at it whenever.
+
 ## Bigger scale (high effort, changes project philosophy)
 
-These move cdev from a small, predictable single-box tool toward a small
-platform. Worth weighing against the "does no dependency on any specific
-box" framing in the README before committing to either.
+This moves cdev from a small, predictable single-box tool toward a small
+platform. Worth weighing against the "no dependency on any specific box"
+framing in the README before committing to it.
 
-- [ ] Multi-server support: aggregate `cdev-status` across boxes, which needs
-      either an SSH fan-out or a lightweight sync of each box's
-      `~/.cdev-sessions`. **Deferred** (curated 18 August 2026): needs a new
-      "control machine" concept this project doesn't have yet, revisit later.
 - [x] Shell support beyond bash: `install.sh` only wires `cdev.sh` into
       `~/.bashrc`. Sourcing it from `~/.zshrc` too needs auditing the script
       for bash-isms that don't hold under zsh. **Scope agreed** (curated 18
       August 2026): `install.sh` detects the active shell and writes the
       `source` line to the matching rc file.
+
+## Considered and dropped
+
+Kept here rather than deleted, so the reasoning does not get lost and the
+idea does not come back around as if it were new.
+
+- **Multi-server support**, an aggregated `cdev status` across boxes, backed
+  by an SSH fan-out or a synced copy of each box's `~/.cdev-sessions`.
+  Deferred 18 August 2026, dropped 19 August 2026. It turned out to be
+  solving problems that are already solved elsewhere. The "see all my
+  sessions at once" case is handled by claude.ai/code itself, which already
+  lists every Remote Control session for an account regardless of which box
+  it runs on, and does it better than a terminal table could. The "tell me
+  when one dies" case is handled by `cdev healthcheck`, which already puts
+  the hostname in its webhook message, so several boxes pointed at one
+  webhook already give a fleet-wide view with no new concept. What would be
+  left is fleet config management, checking unit health and version drift
+  across boxes, and that is an Ansible or ssh-loop job, not something cdev
+  should grow a control-machine concept for.
