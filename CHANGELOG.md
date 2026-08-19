@@ -4,6 +4,7 @@
 
 ### Added
 
+- uninstall.sh to remove the cdev install, reversing all install.sh changes to systemd units, shell rc files, and ~/.cdev.sh. Conservative by default, does not kill running tmux sessions (pass --kill-sessions to stop them), keeps the registry and notify file for reinstalls (pass --purge to delete them), and never disables linger
 - Single cdev entrypoint with subcommands (status, kill, init, accounts, doctor, version, help) replacing five separate function names
 - Workspace-trust failure detection and explanation in cdev-attach, replacing bare tmux exit message
 - Uptime column in cdev status showing session duration

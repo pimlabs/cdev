@@ -13,12 +13,12 @@ on expired login).
 
 ## Commands
 
-No build step, no package manifest. This is two shell scripts plus three
+No build step, no package manifest. This is three shell scripts plus three
 systemd unit files, a GitHub Actions workflow, and a growing bats-core test
 suite.
 
 ```bash
-shellcheck cdev.sh install.sh   # lint
+shellcheck cdev.sh install.sh uninstall.sh   # lint
 ```
 
 Shellcheck also runs in CI on every push and pull request, see
@@ -44,9 +44,13 @@ bats test/            # needs bats-core installed, it is not vendored here
   webhook gate in `_cdev-healthcheck`
 - `test/dispatcher_flags.bats` flag handling in the `cdev()` dispatcher, and
   the registry-corruption chain it once caused (see the file's own header)
+- `test/uninstall.bats` `uninstall.sh`, including that its conservative
+  defaults stay conservative: live sessions are left running, the registry
+  and notify file survive, linger is never disabled
 
-The suite does not cover the `cdev()` dispatcher, `_cdev-doctor`, or
-`_cdev-status`. Those are still hand-verified.
+The suite covers the `cdev()` dispatcher only for flag handling, not for
+subcommand routing. `_cdev-doctor` and `_cdev-status` are not covered at all.
+Those are still hand-verified.
 
 There is no automated way to exercise the install/reboot flow. Verifying a
 change means reasoning through the script by hand, or running it against a
@@ -132,8 +136,9 @@ first-run trust dialog is saved per-directory, and never for `$HOME`, so
 logging in from wherever the SSH session happens to land trusts the wrong
 path.
 
-`install.sh` is the only script that touches the box outside this repo's own
-files: it copies `cdev.sh` into `$HOME` (as the dotfile `.cdev.sh`), clears
+`install.sh` and `uninstall.sh` are the only scripts that touch the box
+outside this repo's own files, and they are a matched pair: `install.sh`
+copies `cdev.sh` into `$HOME` (as the dotfile `.cdev.sh`), clears
 `$HOME/.cdev-restore-all.sh` and `$HOME/.cdev-healthcheck.sh` left over from
 an older install that used the now-deleted standalone scripts, appends a
 `source` line to the detected shell rc file (`~/.zshrc` or `~/.bashrc`), and
@@ -143,3 +148,18 @@ is installed but deliberately not enabled: it has no `[Install]` section and
 is activated by its timer, so enabling it directly would be wrong. Editing
 `cdev.sh` in this repo has no effect on an already-installed box until
 `install.sh` (or a manual copy) runs again, the two are not symlinked.
+
+`uninstall.sh` reverses exactly that: it disables and removes the three
+systemd units, strips the `source` line, and deletes `.cdev.sh` (plus the two
+legacy dotfiles). It cleans both `~/.bashrc` and `~/.zshrc` rather than only
+the shell detected as current, because `install.sh` picked the rc file by the
+shell active at install time, and someone who has since switched shells would
+otherwise be left with a dangling source line that errors on every new shell
+in the file `install.sh` never touched. It is deliberately conservative about
+three things an uninstall could otherwise "helpfully" clean up too far:
+running tmux sessions are left alone (uninstalling the launcher is not a
+reason to kill live work; `--kill-sessions` opts in), the registry and the
+notify file are kept so a reinstall picks up where you left off (`--purge`
+opts in), and linger is never disabled since other systemd `--user` services
+may depend on it by now (the `sudo loginctl disable-linger` command is printed
+instead, left for a human to decide).

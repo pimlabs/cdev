@@ -35,6 +35,31 @@ minute interval (that one stays silent until you opt in, see below). It also
 runs `sudo loginctl enable-linger` so those units can start before any
 interactive login.
 
+## Uninstall
+
+```bash
+./uninstall.sh
+```
+
+Run from inside the repo checkout. It reverses `install.sh`: disables and
+removes the three systemd units, strips the `source "$HOME/.cdev.sh"` line
+from both `~/.bashrc` and `~/.zshrc` (whichever one `install.sh` picked, plus
+the other, in case the shell changed since), and deletes `~/.cdev.sh`.
+
+**Your running tmux sessions are not touched.** Uninstalling the launcher is
+not a reason to kill live Claude sessions, so they keep running under tmux
+and `uninstall.sh` prints how to reach them (`tmux attach -t <name>`). Pass
+`--kill-sessions` to stop them too. The registry (`~/.cdev-sessions`) and the
+webhook config (`~/.cdev-notify`) are kept by default as well, so a reinstall
+picks up where you left off, pass `--purge` to delete them. Linger is never
+disabled since other `systemd --user` services may depend on it by now,
+`uninstall.sh` prints the `sudo loginctl disable-linger` command instead of
+running it, so you can decide.
+
+The `cdev` function stays defined in whichever shell you ran `uninstall.sh`
+from until you open a new one, or run `unset -f cdev` now. Run
+`./uninstall.sh --help` for the full flag list.
+
 ## Commands
 
 `cdev` is a single entrypoint, `cdev <subcommand> ...`. Anything that isn't a
