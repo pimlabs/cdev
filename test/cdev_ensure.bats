@@ -65,6 +65,34 @@ teardown() {
   [ -d "$TEST_HOME/projects/new-project" ]
 }
 
+@test "cdev-ensure git-inits a brand new project directory" {
+  # Every session is spawned with --spawn=worktree, which needs $dir to
+  # already be a git repository. A brand new project directory naturally
+  # isn't one, found live on a VPS: without this, the session died with
+  # "Worktree mode requires a git repository", surfacing only once the
+  # separate workspace-trust failure was out of the way, since trust is
+  # checked first.
+  _cdev-ensure git-me personal "$TEST_HOME/projects/git-me"
+  git -C "$TEST_HOME/projects/git-me" rev-parse --is-inside-work-tree
+}
+
+@test "cdev-ensure leaves an already-initialized project directory alone" {
+  local dir="$TEST_HOME/projects/already-git"
+  mkdir -p "$dir"
+  git -C "$dir" init -q
+  git -C "$dir" config user.email test@example.com
+  git -C "$dir" config user.name test
+  git -C "$dir" commit --allow-empty -q -m "existing history"
+
+  _cdev-ensure already-git personal "$dir"
+
+  # Still exactly one commit, cdev did not reinitialize or otherwise touch
+  # a repo that was already there.
+  local commit_count
+  commit_count=$(git -C "$dir" rev-list --count HEAD)
+  [ "$commit_count" -eq 1 ]
+}
+
 @test "cdev-session-alive is false for a session held open by remain-on-exit with a dead pane" {
   write_stub tmux '
 case "$1" in

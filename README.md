@@ -38,6 +38,12 @@ afterward and says plainly if either is missing:
 - The [Claude Code](https://claude.ai/code) CLI (`claude`), logged in or not,
   cdev handles login per account (see [Commands](#commands) below).
 
+`git` is also required, every session is started with `--spawn=worktree`
+(see [Commands](#commands)), which needs the project directory to already be
+a git repository. `cdev` initializes a brand new directory itself, so this
+is rarely something to think about, and `git` ships on essentially every dev
+box already, `cdev doctor` doesn't check for it separately for that reason.
+
 ## Install
 
 ```bash
@@ -173,7 +179,7 @@ needed, then attach.
 
 | Command | Does |
 |---|---|
-| `cdev <name> [account] [dir]` | Create (if new) and attach to a session. Account defaults to `personal`, maps to `~/.claude-<account>`. `dir` is created if it doesn't exist yet. Logs the account in first if it never has been. If the session exits immediately, most commonly because `dir` has never been trusted under that account, `cdev` opens a one-time trust step there and retries once automatically, instead of leaving a bare tmux `[exited]` or a fix command to run by hand. `cdev open <name> [account] [dir]` and the older `cdev -- <name> [account] [dir]` are explicit equivalents, needed when `<name>` collides with a reserved subcommand word below. |
+| `cdev <name> [account] [dir]` | Create (if new) and attach to a session. Account defaults to `personal`, maps to `~/.claude-<account>`. `dir` is created and `git init`-ed if it doesn't exist yet, `--spawn=worktree` below needs a git repository. Logs the account in first if it never has been. If the session exits immediately, most commonly because `dir` has never been trusted under that account, `cdev` opens a one-time trust step there and retries once automatically, instead of leaving a bare tmux `[exited]` or a fix command to run by hand. `cdev open <name> [account] [dir]` and the older `cdev -- <name> [account] [dir]` are explicit equivalents, needed when `<name>` collides with a reserved subcommand word below. |
 | `cdev status` | List running sessions with their account, attach state, and session uptime. There is no login/credential column: cdev does not read Claude Code's local credential expiry, so it cannot tell a logged-in session from an expired one. |
 | `cdev kill <name>` | Stop a session and remove it from the reboot registry. |
 | `cdev init <account> <dir>` | One-time interactive login for an account, run inside `<dir>` so the trust dialog applies to that project, not `$HOME`. No-ops if it's already logged in. Runs automatically from `cdev` when needed. |

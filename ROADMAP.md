@@ -364,6 +364,21 @@ stubbed tests, which cannot catch a real scheduling race by construction).
       actually check: `_cdev-wait-for-alive` calls `sleep` at least once
       even when a stub reports alive on the very first possible check.
 
+The very next live-VPS test after that race fix landed found a second,
+separate failure sitting right behind it: a brand new project directory,
+exactly the case the trust retry exists for, died right after with
+"Worktree mode requires a git repository". `--spawn=worktree` is the
+default on every session, and a `mkdir -p`'d directory is not a git repo by
+itself. Trust is checked first, so this had been invisible the whole time
+behind the trust failure, only surfacing once that one was actually fixed.
+
+- [x] `_cdev-ensure` now `git init`s `dir` if it is not already a
+      repository, alongside the `mkdir -p` it already does. Guarded on
+      `git` being present, same reasoning as the `claude`/`tmux` guards
+      elsewhere.
+- [x] Added tests confirming a brand new directory gets `git init`-ed and
+      an already-initialized one, existing commits included, is left alone.
+
 ## Bigger scale (high effort, changes project philosophy)
 
 This moves cdev from a small, predictable single-box tool toward a small
