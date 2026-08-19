@@ -68,6 +68,14 @@ fi
 
 have_payload=1
 for f in "${CDEV_PAYLOAD[@]}"; do
+  # A && B || C is exactly what's wanted here: C (mark the payload missing,
+  # break the loop) only has to run when the chain in front of it fails,
+  # and neither A nor B can produce output that makes C fire on its own.
+  # Newer shellcheck (0.10+) already knows this pattern is fine and stays
+  # quiet; older versions, including whatever `apt-get install shellcheck`
+  # resolves to on a given day, still flag it, so the disable stays pinned
+  # here rather than relying on which shellcheck happens to run this in CI.
+  # shellcheck disable=SC2015
   [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/$f" ] || { have_payload=0; break; }
 done
 
