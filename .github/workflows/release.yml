@@ -27,6 +27,10 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Same reasoning as shellcheck.yml's cap: without one, GitHub's default
+    # job timeout is 6 hours, billable the whole time on a private repo if a
+    # step ever hangs. This job normally finishes in well under a minute.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
