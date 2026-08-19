@@ -85,6 +85,16 @@ catch:
       An unrecognized bare word is now a plain error pointing at
       `cdev open`. `cdev -- <name> [account] [dir]` stays working as an
       older, now-secondary equivalent.
+
+      Reverted the same day, before any of this ever shipped in a tagged
+      release: typing `open` for the single most common action read as
+      unnecessary friction. Bare `cdev <name>` is back as the default attach
+      action, matching `v0.2.0`. The "trade-off to accept" two paragraphs up
+      is back too, on purpose, reserved subcommand words are matched by
+      their own case arm ahead of the bare-word fallthrough, so they stay
+      safely reachable directly and can never be shadowed by a same-named
+      project. `cdev open <name>` and `cdev -- <name>` remain the two ways
+      to attach to a project whose name actually collides with one.
 - [x] `_cdev-kill`'s registry removal matched the session name as a
       substring anywhere in the line (`grep -vF -- "$1 "`), not just the
       name field, so killing one session could silently drop an unrelated

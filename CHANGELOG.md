@@ -8,14 +8,13 @@
 - `cdev upgrade` subcommand, for installs made via the curl one-liner that have no checkout to `git pull`. Resolves the latest release tag, does nothing if already on it, otherwise downloads and installs that tag
 - `.github/workflows/release.yml` publishes a GitHub Release and attaches install.sh and SHA256SUMS as assets on every `v*` tag push, which is what makes `releases/latest/download/install.sh` resolve to the newest release
 - SHA256SUMS checksum verification: `install.sh`'s piped mode and `cdev upgrade` both download the release tarball to a file, verify it against the `SHA256SUMS` release asset, and abort with a clear message on a mismatch or a missing `SHA256SUMS`, instead of extracting and running an unverified download
-- `cdev open <name> [account] [dir]` subcommand, the new way to create or attach to a session. `cdev -- <name> [account] [dir]` keeps working as an older, now-secondary equivalent
+- `cdev open <name> [account] [dir]` subcommand, an explicit equivalent to bare `cdev <name> [account] [dir]` (the default action, unchanged from `v0.2.0`), for a project name that collides with a reserved subcommand word. `cdev -- <name> [account] [dir]` keeps working as an older equivalent for the same case
 
 ### Changed
 
 - `cdev doctor` now also reports the latest published release tag on GitHub, alongside the existing `$PWD` checkout comparison. Its only version check before this was against a `cdev.sh` in `$PWD`, which a curl install never has, so doctor silently skipped that check and read as up to date with no way to tell otherwise
 - `uninstall.sh` is deleted. Its logic is now `_cdev-uninstall`, reachable as the `cdev uninstall` subcommand. Behavior and every flag (`--kill-sessions`, `--purge`) are unchanged; only how you run it changed, from `./uninstall.sh` to `cdev uninstall`
 - The `./cdev.sh <args>` direct-invoke check now uses `(return 0 2>/dev/null)` instead of comparing `BASH_SOURCE[0]` to `$0`. The old comparison could misreport a sourced call as a direct one if something invoked bash with an explicit `$0` matching the sourced path, which surfaced as a real test failure once `cdev uninstall` needed to be exercised as a subcommand rather than a standalone script
-- **Breaking:** a bare `cdev <name>` no longer creates or attaches to a session. An unrecognized subcommand word now prints an error pointing at `cdev open <name>` instead of silently registering it as a project. This closes the collision between project names and subcommand words entirely, rather than just documenting it as a trade-off: `cdev open status` always attaches to a session named `status`
 
 ### Fixed
 

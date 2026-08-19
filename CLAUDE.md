@@ -73,23 +73,27 @@ directly, the sole public entrypoint: it routes `cdev open`, `cdev status`,
 `_cdev-sha256`, `_cdev-latest-tag`, `_cdev-restore`,
 `_cdev-restore-still-registered`, `_cdev-healthcheck`, `_cdev-uninstall`,
 `_cdev-help`, `_cdev-format-duration`, `_cdev-config-dir`, `_cdev-ensure`,
-`_cdev-ensure-append`, `_cdev-registry-locked`). `cdev open <name> [account]
-[dir]` is the only way to reach `_cdev-attach`, alongside the older `cdev --
-<name> [account] [dir]` escape hatch kept for anyone already using it.
-Before `cdev open` existed, an unrecognized word fell through to
-`_cdev-attach` and was silently created and attached to as a project
-session, so a project could never safely be named `status`, `kill`,
-`doctor`, or any other subcommand word, exactly the short, ordinary words
-someone would plausibly pick for a real project, and the list only grows as
-more subcommands get added. The `*)` fallthrough now prints an error
-pointing at `cdev open $sub` instead of guessing, so `cdev open status`
-always means attach to a session named `status`, whatever else `status`
-means as a bare subcommand, closing that collision class entirely rather
-than documenting it as a trade-off to accept. The leading underscore marks
-every one of these as implementation detail, not a supported interface, so
-nothing outside `cdev.sh` itself should call them by name. There is no
-exception any more: `cdev` is the only function in the file without the
-underscore prefix.
+`_cdev-ensure-append`, `_cdev-registry-locked`). Bare `cdev <name> [account]
+[dir]` is the default action and the primary way to reach `_cdev-attach`:
+anything the dispatcher's `case` doesn't recognize as a subcommand word
+falls through to it as a project name, created and attached. `cdev open
+<name> [account] [dir]` and the older `cdev -- <name> [account] [dir]`
+escape hatch reach the same place explicitly, which matters only for a
+project name that collides with a reserved subcommand word (`status`,
+`kill`, `doctor`, and the rest), exactly the short, ordinary words someone
+would plausibly pick for a real project, and the list only grows as more
+subcommands get added. That collision is a deliberate, accepted trade-off,
+the same one `git` and `npm` make by giving a bare argument their own
+default action, not a bug: a 19 August 2026 architecture council pass tried
+closing it entirely by making `cdev open` the only path and erroring on
+every bare word, and it was reverted the same day, before ever shipping in
+a release, because typing `open` for the single most common action read as
+unnecessary friction against the small, real risk of a project actually
+being named after a reserved word. The leading underscore marks every one
+of these as implementation detail, not a supported interface, so nothing
+outside `cdev.sh` itself should call them by name. There is no exception any
+more: `cdev` is the only function in the file without the underscore
+prefix.
 
 - `_cdev-attach` holds the login-then-ensure-then-tmux-attach logic that used
   to live directly in `cdev`.

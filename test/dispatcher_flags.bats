@@ -68,17 +68,24 @@ teardown() {
   grep -qxF -- "myproject personal $TEST_HOME/p" "$CDEV_REGISTRY"
 }
 
-@test "a bare unrecognized word is rejected instead of silently attaching" {
-  # This is the collision risk cdev open exists to close: status, kill,
-  # doctor, and so on are exactly the kind of short, ordinary word someone
-  # would pick as a real project name. A bare `cdev myproject` must no
-  # longer create or attach to anything.
-  run cdev myproject
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"isn't a recognized subcommand"* ]]
-  [[ "$output" == *"cdev open myproject"* ]]
+@test "a bare unrecognized word is treated as a project name and attached" {
+  # Reverted back to this on purpose: cdev <name> is the default action
+  # again, matching v0.2.0's original behavior, because typing `open` for
+  # the single most common action read as unnecessary friction in practice.
+  # Reserved subcommand words stay protected, see the test below, so this
+  # only ever applies to a genuinely unrecognized word.
+  run cdev myproject personal "$TEST_HOME/p"
+  grep -qxF -- "myproject personal $TEST_HOME/p" "$CDEV_REGISTRY"
+}
 
-  [ ! -f "$CDEV_REGISTRY" ] || ! grep -q '^myproject ' "$CDEV_REGISTRY"
+@test "reserved subcommand words stay safe to call directly, never shadowed by a project" {
+  # status, kill, doctor, and the rest are matched by their own case arm
+  # before the bare-word fallthrough, so a project can never accidentally
+  # capture one of these names by being attached first.
+  run cdev status
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"isn't a recognized subcommand"* ]]
+  [ ! -f "$CDEV_REGISTRY" ] || ! grep -q '^status ' "$CDEV_REGISTRY"
 }
 
 @test "_cdev-ensure dedups a registry line that starts with a dash" {

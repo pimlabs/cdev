@@ -127,13 +127,15 @@ from until you open a new one, or run `unset -f cdev` now. Run
 
 ## Commands
 
-`cdev` is a single entrypoint, `cdev <subcommand> ...`. An unrecognized
-subcommand is an error, not a project name, `cdev open <name>` below is the
-only way to create or attach to a session.
+`cdev` is a single entrypoint, `cdev <subcommand> ...`. `cdev <name>
+[account] [dir]` (bare, no subcommand word) is the default action: create if
+needed, then attach. A project can't be named after a reserved subcommand
+word below (`status`, `kill`, `doctor`, and the rest), use `cdev open <name>`
+or `cdev -- <name>` instead if it needs to be.
 
 | Command | Does |
 |---|---|
-| `cdev open <name> [account] [dir]` | Create (if new) and attach to a session. Account defaults to `personal`, maps to `~/.claude-<account>`. Logs the account in first if it never has been. If the session exits immediately because the account isn't trusted in `dir` yet, `cdev` now detects that and prints the fix directly, instead of leaving a bare tmux `[exited]` with no explanation. `cdev -- <name> [account] [dir]` is an older equivalent, kept working. |
+| `cdev <name> [account] [dir]` | Create (if new) and attach to a session. Account defaults to `personal`, maps to `~/.claude-<account>`. Logs the account in first if it never has been. If the session exits immediately because the account isn't trusted in `dir` yet, `cdev` now detects that and prints the fix directly, instead of leaving a bare tmux `[exited]` with no explanation. `cdev open <name> [account] [dir]` and the older `cdev -- <name> [account] [dir]` are explicit equivalents, needed when `<name>` collides with a reserved subcommand word below. |
 | `cdev status` | List running sessions with their account, attach state, and session uptime. There is no login/credential column: cdev does not read Claude Code's local credential expiry, so it cannot tell a logged-in session from an expired one. |
 | `cdev kill <name>` | Stop a session and remove it from the reboot registry. |
 | `cdev init <account> <dir>` | One-time interactive login for an account, run inside `<dir>` so the trust dialog applies to that project, not `$HOME`. No-ops if it's already logged in. Runs automatically from `cdev` when needed. |
@@ -146,12 +148,11 @@ only way to create or attach to a session.
 | `cdev version` (`--version`, `-v`) | Print the installed cdev version. |
 | `cdev help` (`--help`, `-h`) | Show usage and the subcommand list. Also what bare `cdev` prints. |
 
-Attaching always goes through `cdev open <name>`, never a bare word, so a
-project name can be `status`, `kill`, `doctor`, or any other subcommand word
-with no collision at all: `cdev open status` always means attach to a
-session named `status`, whatever else `status` means elsewhere in this
-table. `git` and `npm`, by contrast, do have this collision, since a bare
-argument is their default action.
+A project name can't be `status`, `kill`, `doctor`, or any other word in
+this table, `cdev` would treat it as that subcommand instead of a project.
+Use `cdev open <name>` or `cdev -- <name>` for a project that genuinely
+needs one of those names. Same trade-off `git` and `npm` accept, since a
+bare argument is their default action too.
 
 Must run inside `tmux` (which `cdev` handles for you), not a bare SSH shell,
 or the session dies the moment SSH disconnects. The first time `cdev` is
@@ -171,7 +172,7 @@ that account's own `claude.ai/code` session list, not a combined one.
 `cdev init` is only wired into `cdev` itself, not into the boot-time restore
 path (`cdev restore`), an interactive login prompt with nothing attached to
 a terminal would just hang that service. So a brand new account still needs
-its first `cdev open <name> <account>` run by hand over SSH, after that its
+its first `cdev <name> <account>` run by hand over SSH, after that its
 session survives reboots like any other.
 
 Every session is started with `--spawn=worktree`, so a session
@@ -189,8 +190,7 @@ Remote Control. To check in from elsewhere:
    on the phone/laptop/browser you want to use, signed in with the **same
    account** the session was started under.
 2. Find the session by the name you gave it, that's the `<name>` you passed
-   to `cdev open`. Sessions show a computer icon with a green dot when
-   online.
+   to `cdev`. Sessions show a computer icon with a green dot when online.
 3. Tap in to watch progress live or send a message, it stays in sync with
    whatever's happening in the server's terminal.
 
@@ -201,14 +201,14 @@ is actually running (`cdev status` on the server).
 
 ## Basic tmux, if you're not used to it
 
-`cdev open <name>` attaches you to the session's terminal. To leave it
+`cdev <name>` attaches you to the session's terminal. To leave it
 running and get your shell back:
 
 ```
 Ctrl+b, then d
 ```
 
-That detaches without stopping anything, running `cdev open <name>` again
+That detaches without stopping anything, running `cdev <name>` again
 later reattaches to the same session. Closing the terminal window or losing the
 SSH connection does the same thing by accident, tmux keeps the session
 alive either way.

@@ -114,13 +114,15 @@ _cdev-init() {
 }
 
 # Interactive entry point: log the account in first if needed, ensure the
-# session exists, then attach to it. Reached via `cdev open <name>
-# [account] [dir]` (and the older `cdev -- <name> [account] [dir]` escape
-# hatch), never via a bare unrecognized word any more, so a name never has
-# to avoid colliding with a subcommand.
+# session exists, then attach to it. Reached via bare `cdev <name> [account]
+# [dir]` (the default action for any word that isn't a reserved subcommand),
+# or explicitly via `cdev open <name> [account] [dir]` and the older
+# `cdev -- <name> [account] [dir]` escape hatch. A project can't be named
+# `status`, `kill`, `doctor`, or any other reserved subcommand word without
+# using one of those two explicit forms, same trade-off `git`/`npm` accept.
 _cdev-attach() {
   if [ -z "${1:-}" ]; then
-    echo "Usage: cdev open <project-name> [account] [dir]"
+    echo "Usage: cdev <project-name> [account] [dir]"
     return 1
   fi
   local name="$1"
@@ -704,18 +706,17 @@ _cdev-help() {
   echo "cdev $CDEV_VERSION"
   echo ""
   cat <<'EOF'
-Usage: cdev open <name> [account] [dir]
+Usage: cdev <name> [account] [dir]
   Attaches to (creating if needed) a persistent session for <name>.
   account defaults to 'personal', mapping to ~/.claude-<account>.
   dir defaults to ~/projects/<name>.
-  `cdev -- <name> [account] [dir]` is an older equivalent, still works,
-  kept for anyone already using it.
+  <name> can't be one of the reserved words below; `cdev open <name>
+  [account] [dir]` and the older `cdev -- <name> [account] [dir]` reach the
+  same place explicitly, for a project that needs one of those names.
 
-Subcommands:
+Subcommands (also reserved, can't be used as a bare project name):
   open <name> [account] [dir]
-                           Create (if needed) and attach to a session.
-                           account defaults to 'personal', dir defaults to
-                           ~/projects/<name>.
+                           Same as bare `cdev <name>`, explicit form.
   status                   List running sessions with account, attach state,
                            and uptime.
   kill <name>              Kill a session and remove it from the reboot
@@ -740,10 +741,11 @@ Subcommands:
 EOF
 }
 
-# Single entrypoint. Routes to the functions above; `cdev open <name>
-# [account] [dir]` (or the older `cdev -- <name> ...`) is the only way to
-# reach _cdev-attach now, an unrecognized word is an error rather than an
-# implicit project name.
+# Single entrypoint. Routes to the functions above; anything not matching a
+# reserved subcommand word falls through to _cdev-attach as a bare project
+# name, the default action. `cdev open <name> [account] [dir]` and the older
+# `cdev -- <name> ...` reach the same place explicitly, for a project name
+# that collides with a reserved word.
 cdev() {
   local sub="${1:-}"
   case "$sub" in
@@ -808,14 +810,14 @@ cdev() {
       return 1
       ;;
     *)
-      # No more implicit attach-by-bare-word: a project name that happened
-      # to match nothing above used to silently register and attach, which
-      # is exactly the collision risk this exists to avoid (see CLAUDE.md /
-      # ROADMAP.md). Say so explicitly instead of guessing.
-      echo "cdev: '$sub' isn't a recognized subcommand." >&2
-      echo "Run 'cdev open $sub' to create or attach to a session named '$sub'," >&2
-      echo "or 'cdev help' for the full subcommand list." >&2
-      return 1
+      # Bare-word default: anything that didn't match a reserved subcommand
+      # word above is treated as a project name and attached (creating it
+      # first if needed). Every reserved word (status, kill, doctor, and the
+      # rest) is matched by its own case arm above this one, so it always
+      # routes there first and can never be shadowed by a same-named
+      # project. Only a project actually named one of those reserved words
+      # needs `cdev open <name>` or `cdev -- <name>` instead.
+      _cdev-attach "$@"
       ;;
   esac
 }
