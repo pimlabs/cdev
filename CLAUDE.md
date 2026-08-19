@@ -126,6 +126,33 @@ sourced `~/.cdev.sh`) against the version in whatever `cdev.sh` sits in
 best-effort: it is skipped entirely when no `cdev.sh` is found in the
 current directory.
 
+## Releasing
+
+Three things move together, and a release is wrong if any one of them is
+missing. `CDEV_VERSION` is the number a user's box reports, `CHANGELOG.md`
+is what a version mismatch actually means, and the tag is what makes a
+version recoverable later. Bumping the variable alone tells someone their
+install is stale without telling them what changed.
+
+1. Bump `CDEV_VERSION` in `cdev.sh`.
+2. Turn the `[Unreleased]` heading in `CHANGELOG.md` into the new version
+   with the date, open a fresh empty `[Unreleased]` above it, and update the
+   two link definitions at the bottom of the file.
+3. Commit, then `git tag -a vX.Y.Z` with a message summarising the release.
+4. `git push origin main --follow-tags`, which pushes the commit and the tag
+   in one go. A plain `git push` leaves the tag behind on the laptop.
+
+Pre-1.0, so a breaking change bumps the minor, not the major. Renaming or
+removing anything a user types (a subcommand, a flag) or anything an
+installed box calls counts as breaking, since `install.sh` copies `cdev.sh`
+rather than symlinking it and boxes therefore run whatever version they were
+last installed with.
+
+Do not bump the version for a change nobody's box can observe, such as docs
+or tests. A version only earns a bump when re-running `install.sh` would give
+the user something different, which is precisely what makes `cdev doctor`'s
+"versions differ" line worth acting on rather than noise.
+
 Per-account isolation runs entirely through `CLAUDE_CONFIG_DIR`: account
 `personal` uses `~/.claude`, any other account name uses `~/.claude-<account>`
 (this mirrors the two-Claude-config-dir setup documented in the user's global
