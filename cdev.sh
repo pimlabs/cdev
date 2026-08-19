@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Persistent, multi-account Claude Code sessions on this VPS.
-# Sourced from ~/.bashrc. See cdev-restore-all.sh for the reboot-recovery half.
-# Single entrypoint: `cdev <subcommand> ...` dispatches to the functions below.
+# Sourced from the shell rc file at install time. Single entrypoint: `cdev
+# <subcommand> ...` dispatches to the underscore-prefixed functions below,
+# which are implementation detail and not meant to be called directly. The
+# systemd units call `cdev restore` and `cdev healthcheck` the same way a
+# human would, after sourcing this file.
 
 CDEV_VERSION="0.1.0"
 CDEV_REGISTRY="$HOME/.cdev-sessions"
 
 # Map an account to its CLAUDE_CONFIG_DIR. 'personal' uses ~/.claude, any
-# other account uses ~/.claude-<account>. One helper so cdev-ensure,
+# other account uses ~/.claude-<account>. One helper so _cdev-ensure,
 # _cdev-init, and _cdev-attach can't drift from each other on this mapping.
 _cdev-config-dir() {
   local account="${1:-personal}"
@@ -19,8 +22,9 @@ _cdev-config-dir() {
 }
 
 # Create the tmux + Remote Control session if it doesn't already exist, and
-# record it in the registry. Does not attach, safe to call at boot.
-cdev-ensure() {
+# record it in the registry. Does not attach, so it is safe to call with no
+# terminal attached, which is what the boot path depends on.
+_cdev-ensure() {
   local name="$1"
   local account="${2:-personal}"
   local dir="${3:-$HOME/projects/$name}"
@@ -33,13 +37,25 @@ cdev-ensure() {
     # no shell involved, so a name or account containing quotes/semicolons/etc
     # can't break out into arbitrary shell execution (requires tmux >= 3.2
     # for -e on new-session).
-    tmux new-session -d -s "$name" -c "$dir" -e "CLAUDE_CONFIG_DIR=$config_dir" \
-      claude remote-control --name "$name" --spawn=worktree
+    if ! tmux new-session -d -s "$name" -c "$dir" -e "CLAUDE_CONFIG_DIR=$config_dir" \
+      claude remote-control --name "$name" --spawn=worktree; then
+      # tmux itself refused (no server, name clash, tmux older than 3.2).
+      # Report it and skip the registry write rather than recording a
+      # session that was never created.
+      echo "cdev: failed to create tmux session '$name'" >&2
+      return 1
+    fi
     tmux set-environment -t "$name" CDEV_ACCOUNT "$account"
   fi
 
   touch "$CDEV_REGISTRY"
-  grep -qxF "$name $account $dir" "$CDEV_REGISTRY" || echo "$name $account $dir" >> "$CDEV_REGISTRY"
+  # The `--` matters: without it a registry line starting with a dash makes
+  # grep read the line as its own options, fail, and take the `||` branch,
+  # so the line is appended again on every single call. Paired with
+  # _cdev-restore reading this same file line by line, that turns into a
+  # loop that never ends and a registry that grows without limit.
+  grep -qxF -- "$name $account $dir" "$CDEV_REGISTRY" ||
+    echo "$name $account $dir" >> "$CDEV_REGISTRY"
 }
 
 # One-time interactive login for an account, run inside the target project
@@ -47,7 +63,7 @@ cdev-ensure() {
 # so this has to happen in $dir, not wherever the SSH session happens to
 # land, or the login "succeeds" but the project still isn't trusted. Safe to
 # call again, no-ops if the account's config dir already exists. Deliberately
-# NOT called from cdev-ensure: that path also runs at boot with no attached
+# NOT called from _cdev-ensure: that path also runs at boot with no attached
 # terminal, and an interactive login/trust prompt there would just hang the
 # restore service.
 _cdev-init() {
@@ -82,7 +98,7 @@ _cdev-attach() {
 
   local was_running=0
   tmux has-session -t "$name" 2>/dev/null && was_running=1
-  cdev-ensure "$name" "$account" "$dir"
+  _cdev-ensure "$name" "$account" "$dir"
 
   # Only pay for the liveness check on a session this call actually created.
   # A session that was already up cannot be failing at spawn time, so
@@ -158,7 +174,7 @@ _cdev-status() {
 
 # Kill a session AND remove it from the registry, so it does not come back
 # on the next reboot. A session stopped some other way (crash, VPS restart)
-# stays in the registry and gets recreated by cdev-restore-all.sh.
+# stays in the registry and gets recreated by `cdev restore`.
 _cdev-kill() {
   if [ -z "${1:-}" ]; then
     echo "Usage: cdev kill <project-name>"
@@ -183,6 +199,72 @@ _cdev-kill() {
       rm -f "$CDEV_REGISTRY.tmp"
     fi
   fi
+}
+
+# Recreate every registered session. Run at boot by cdev-restore.service,
+# and safe to run by hand since _cdev-ensure no-ops on sessions that are
+# already up. This file is sourced into an interactive shell, so it can't
+# lean on `set -e` the way a standalone script would; the loop therefore
+# handles a failing session explicitly. One session that can't come up must
+# not stop the others from being restored, so the failure is counted and
+# the loop continues, with a non-zero return at the end so systemd still
+# marks the unit failed rather than reporting a clean boot.
+_cdev-restore() {
+  [ -f "$CDEV_REGISTRY" ] || return 0
+
+  # Iterate over a snapshot, not over the live file. _cdev-ensure appends to
+  # the registry, so reading the file directly means the loop can be fed by
+  # its own writes and never reach the end.
+  local snapshot name account dir failed=0
+  snapshot=$(cat "$CDEV_REGISTRY")
+  while read -r name account dir; do
+    [ -z "$name" ] && continue
+    if ! _cdev-ensure "$name" "$account" "$dir"; then
+      failed=$((failed + 1))
+    fi
+  done <<< "$snapshot"
+
+  if [ "$failed" -gt 0 ]; then
+    echo "cdev restore: $failed session(s) failed to restore" >&2
+    return 1
+  fi
+}
+
+# Notice when a registered session disappeared unexpectedly (a crash), as
+# opposed to a clean `cdev kill`, which already removes its own registry
+# line so it is never flagged as missing. Opt-in and silent by default:
+# does nothing unless ~/.cdev-notify holds a webhook URL. Run every 5
+# minutes by cdev-healthcheck.timer, safe to run by hand too.
+_cdev-healthcheck() {
+  [ -f "$CDEV_REGISTRY" ] || return 0
+
+  local notify_file="$HOME/.cdev-notify"
+  [ -s "$notify_file" ] || return 0
+  local webhook_url
+  webhook_url="$(head -n 1 "$notify_file")"
+  [ -n "$webhook_url" ] || return 0
+
+  # Without tmux on PATH every has-session below fails, which would read as
+  # "every registered session crashed" and fire one webhook per line. That
+  # is a broken check, not a finding, so stop quietly instead. Worth
+  # guarding even though tmux is a hard requirement of cdev: this also runs
+  # from a systemd --user unit, whose PATH is not the login shell's.
+  command -v tmux >/dev/null 2>&1 || return 0
+
+  local host now name account _dir message
+  host="$(hostname 2>/dev/null || echo unknown-host)"
+  now="$(date -u +%H:%M 2>/dev/null || echo '??:??')"
+
+  while read -r name account _dir; do
+    [ -z "$name" ] && continue
+    if ! tmux has-session -t "$name" 2>/dev/null; then
+      message="cdev: session '$name' (account $account, box $host) disappeared unexpectedly at $now UTC. Registry still lists it; run 'cdev status' to confirm, or 'cdev $name' to respawn."
+      # A webhook that is down is not a reason to skip the remaining
+      # sessions, and its response body is noise in the journal every 5
+      # minutes, so the call is silenced and its failure swallowed.
+      curl -fsS -X POST "$webhook_url" -H 'Content-Type: text/plain' -d "$message" >/dev/null 2>&1 || true
+    fi
+  done < "$CDEV_REGISTRY"
 }
 
 # Print one line of _cdev-doctor's systemd unit report for $1, given that
@@ -263,6 +345,11 @@ Subcommands:
   init <account> <dir>  One-time interactive login/trust setup for an account.
   accounts              List configured account config directories.
   doctor                Show install version and systemd/linger health.
+  restore               Recreate every registered session. Run at boot by
+                        cdev-restore.service, safe to run by hand.
+  healthcheck           Report registered sessions that vanished from tmux.
+                        Run every 5 minutes by cdev-healthcheck.timer, and
+                        silent unless ~/.cdev-notify holds a webhook URL.
   version               Print the installed cdev version.
   help                  Show this message.
 EOF
@@ -298,11 +385,28 @@ cdev() {
       shift
       _cdev-doctor "$@"
       ;;
-    version)
+    restore)
+      shift
+      _cdev-restore "$@"
+      ;;
+    healthcheck)
+      shift
+      _cdev-healthcheck "$@"
+      ;;
+    version|--version|-v)
       echo "cdev $CDEV_VERSION"
       ;;
     help|--help|-h|"")
       _cdev-help
+      ;;
+    -*)
+      # Anything else that looks like a flag is a typo, not a project. The
+      # fallthrough below would otherwise treat it as a session name and
+      # register it, which is how `cdev --version` used to end up in the
+      # registry as a project called "--version".
+      echo "cdev: unknown option '$sub'" >&2
+      echo "Run 'cdev help' for usage, or 'cdev -- $sub' to use it as a project name." >&2
+      return 1
       ;;
     *)
       _cdev-attach "$@"

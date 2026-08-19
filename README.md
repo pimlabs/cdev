@@ -22,15 +22,18 @@ cd cdev
 source ~/.cdev.sh
 ```
 
-`install.sh` copies `cdev.sh` to `~/.cdev.sh` and `cdev-healthcheck.sh` to
-`~/.cdev-healthcheck.sh`, detects whether the login shell is zsh or bash and
-sources `cdev.sh` from the matching rc file (`~/.zshrc` or `~/.bashrc`), and
-installs three `systemd --user` units. It enables `cdev-restore.service`,
-which recreates every registered session automatically after a reboot with no
-manual step, and `cdev-healthcheck.timer`, which drives
-`cdev-healthcheck.service` on a 5 minute interval (that one stays silent until
-you opt in, see below). It also runs `sudo loginctl enable-linger` so those
-units can start before any interactive login.
+`install.sh` copies `cdev.sh` to `~/.cdev.sh`, detects whether the login
+shell is zsh or bash and sources it from the matching rc file (`~/.zshrc` or
+`~/.bashrc`), and installs three `systemd --user` units. Everything, the
+interactive commands, the boot-time restore, and the health check, lives in
+that one `cdev.sh`, dispatched through `cdev restore` and `cdev healthcheck`
+the same way a human would call `cdev status`. It enables
+`cdev-restore.service`, which recreates every registered session
+automatically after a reboot with no manual step, and
+`cdev-healthcheck.timer`, which drives `cdev-healthcheck.service` on a 5
+minute interval (that one stays silent until you opt in, see below). It also
+runs `sudo loginctl enable-linger` so those units can start before any
+interactive login.
 
 ## Commands
 
@@ -46,12 +49,15 @@ creating) a project session.
 | `cdev init <account> <dir>` | One-time interactive login for an account, run inside `<dir>` so the trust dialog applies to that project, not `$HOME`. No-ops if it's already logged in. Runs automatically from `cdev` when needed. |
 | `cdev accounts` | List which `~/.claude*` config dirs (accounts) exist. |
 | `cdev doctor` | Check install health: installed vs repo version, whether the systemd units are enabled/active, and whether linger is on. |
+| `cdev restore` | Recreate every registered session. Run automatically at boot by `cdev-restore.service`; safe to run by hand too, it no-ops on sessions that already exist. |
+| `cdev healthcheck` | Report registered sessions that vanished from tmux without going through `cdev kill`. Run every 5 minutes by `cdev-healthcheck.timer`; silent unless `~/.cdev-notify` holds a webhook URL. |
 | `cdev version` | Print the installed cdev version. |
 | `cdev help` | Show usage and the subcommand list. |
 
 A project name can't collide with a subcommand word (`status`, `kill`, `init`,
-`accounts`, `doctor`, `version`, `help`), the same convention `git` and `npm`
-use. If it does, force attach mode with `cdev -- <name> [account] [dir]`.
+`accounts`, `doctor`, `restore`, `healthcheck`, `version`, `help`), the same
+convention `git` and `npm` use. If it does, force attach mode with
+`cdev -- <name> [account] [dir]`.
 
 Must run inside `tmux` (which `cdev` handles for you), not a bare SSH shell,
 or the session dies the moment SSH disconnects. The first time `cdev` is
@@ -69,12 +75,12 @@ Control sessions. Sessions logged into different accounts show up under
 that account's own `claude.ai/code` session list, not a combined one.
 
 `cdev init` is only wired into `cdev` itself, not into the boot-time restore
-path (`cdev-restore-all.sh`), an interactive login prompt with nothing
-attached to a terminal would just hang that service. So a brand new account
-still needs its first `cdev <name> <account>` run by hand over SSH, after
-that its session survives reboots like any other.
+path (`cdev restore`), an interactive login prompt with nothing attached to
+a terminal would just hang that service. So a brand new account still needs
+its first `cdev <name> <account>` run by hand over SSH, after that its
+session survives reboots like any other.
 
-`cdev-ensure` starts every session with `--spawn=worktree`, so a session
+Every session is started with `--spawn=worktree`, so a session
 spawned against it later from claude.ai/code or the mobile app gets an
 isolated git worktree instead of sharing the working directory, no prompt
 asked. Edit the flag in `cdev.sh` if some project genuinely wants
@@ -117,19 +123,25 @@ alive either way.
 
 `cdev` appends every session it creates to `~/.cdev-sessions` (one line:
 `name account dir`). `cdev kill` removes the matching line so a
-deliberately-stopped session doesn't come back. `cdev-restore-all.sh` reads
-that file and calls `cdev-ensure` (the non-attaching half of `cdev`) for
-each entry; the systemd unit runs that script once at boot. A session that
-stops some other way (server reboot, crash) stays in the registry and gets
-recreated automatically the next time the box comes up.
+deliberately-stopped session doesn't come back. `cdev restore` reads that
+file and recreates each entry the same way `cdev` does when it creates a new
+session, just without attaching; `cdev-restore.service` runs it once at
+boot, by sourcing `~/.cdev.sh` and calling `cdev restore` directly. A
+session that stops some other way (server reboot, crash) stays in the
+registry and gets recreated automatically the next time the box comes up.
+`cdev restore` is also safe to run by hand at any time, it no-ops on
+sessions that already exist and only reports a failure for the ones that
+didn't come up.
 
 ## Health-check notifications (optional)
 
-`cdev-healthcheck.timer` runs every 5 minutes and compares the registry
-against the tmux sessions actually running. If a registered session vanished
-without going through `cdev kill` (a crash, an OOM kill, anything other than
-a deliberate stop), it POSTs a plain-text message describing which session
-disappeared to a webhook URL.
+`cdev-healthcheck.timer` runs every 5 minutes and drives
+`cdev-healthcheck.service`, which sources `~/.cdev.sh` and calls
+`cdev healthcheck`. That compares the registry against the tmux sessions
+actually running. If a registered session vanished without going through
+`cdev kill` (a crash, an OOM kill, anything other than a deliberate stop),
+it POSTs a plain-text message describing which session disappeared to a
+webhook URL.
 
 This is opt-in and silent by default. To turn it on, write the webhook URL
 into `~/.cdev-notify`, one line, nothing else to configure. If that file

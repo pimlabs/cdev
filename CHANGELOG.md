@@ -16,10 +16,15 @@
 
 ### Changed
 
-- Internal helper functions (`_cdev-status`, `_cdev-kill`, `_cdev-init`, `_cdev-attach`, `_cdev-accounts`, `_cdev-doctor`, `_cdev-doctor-unit`, `_cdev-format-duration`, `_cdev-config-dir`, `_cdev-help`) are now prefixed with an underscore and not meant to be called directly. `cdev` is the one supported public entrypoint. `cdev-ensure` keeps its unprefixed name, since `cdev-restore-all.sh` calls it directly.
+- Internal helper functions (`_cdev-status`, `_cdev-kill`, `_cdev-init`, `_cdev-attach`, `_cdev-accounts`, `_cdev-doctor`, `_cdev-doctor-unit`, `_cdev-format-duration`, `_cdev-config-dir`, `_cdev-help`) are now prefixed with an underscore and not meant to be called directly. `cdev-ensure` is also renamed to `_cdev-ensure`, dropping the exception it used to have, so `cdev` is now the only unprefixed function and the sole supported public entrypoint.
+- The standalone scripts `cdev-restore-all.sh` and `cdev-healthcheck.sh` are deleted, their logic now lives in `cdev.sh` as `_cdev-restore` and `_cdev-healthcheck`, reachable as the `cdev restore` and `cdev healthcheck` subcommands. Behavior is unchanged: restore still replays every registry line, healthcheck is still opt-in and silent unless `~/.cdev-notify` holds a webhook URL. The `cdev-restore.service` and `cdev-healthcheck.service` systemd units now source `~/.cdev.sh` and call these subcommands (`ExecStart=/bin/bash -c "source %h/.cdev.sh && cdev <subcommand>"`) instead of invoking the deleted scripts, and `install.sh` no longer copies those two scripts into `$HOME`, removing any leftover copies from an older install instead.
+- `_cdev-ensure` now returns 1 and prints to stderr when `tmux new-session` itself fails, instead of always returning 0. `_cdev-restore` counts those failures, keeps going through the rest of the registry, and returns 1 at the end if any session failed to start.
 
 ### Fixed
 
 - cdev-ensure no longer builds the new session's launch command as a single shell string, an account or project name containing shell metacharacters could reach `sh -c` and execute arbitrary commands, including on every reboot via the registry replay
 - cdev-kill no longer wipes the entire registry when the session name contains characters `grep`'s basic regex parser rejects, it now matches the name as a literal string
 - cdev-attach polls for up to 3 seconds instead of a single fixed 1-second sleep before diagnosing a workspace-trust failure, avoiding a false positive on a slow session start
+- `cdev --version` and `cdev -v` now print the version. They were not dispatcher cases, so they fell through to the default action and were registered as a project literally named `--version`. Any other unrecognized flag is now rejected with an error instead of being taken as a session name; `cdev -- <name>` remains the way to use a genuinely dash-named project
+- `_cdev-ensure`'s dedup check now passes `--` to grep. Without it a registry line starting with a dash was read by grep as its own options, so the check failed and the line was appended again on every call
+- `_cdev-restore` iterates over a snapshot of the registry rather than the live file. Combined with the dedup bug above, reading the file while `_cdev-ensure` appended to it turned the loop into one that never ended and a registry that grew without limit (a real run reached 12,657 identical lines)

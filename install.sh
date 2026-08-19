@@ -7,10 +7,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 cp "$SCRIPT_DIR/cdev.sh" "$HOME/.cdev.sh"
-cp "$SCRIPT_DIR/cdev-restore-all.sh" "$HOME/.cdev-restore-all.sh"
-chmod +x "$HOME/.cdev-restore-all.sh"
-cp "$SCRIPT_DIR/cdev-healthcheck.sh" "$HOME/.cdev-healthcheck.sh"
-chmod +x "$HOME/.cdev-healthcheck.sh"
+
+# Older installs had the boot and health-check halves as their own copied
+# dotfiles. Both are now `cdev restore` / `cdev healthcheck` subcommands
+# inside .cdev.sh, and the systemd units below no longer point at them, so
+# clear the leftovers rather than leaving dead scripts in $HOME.
+rm -f "$HOME/.cdev-restore-all.sh" "$HOME/.cdev-healthcheck.sh"
 
 SHELL_NAME="$(basename "${SHELL:-}")"
 if [ "$SHELL_NAME" = "zsh" ]; then

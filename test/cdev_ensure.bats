@@ -20,7 +20,7 @@ teardown() {
 }
 
 @test "cdev-ensure writes one registry line for a new session" {
-  cdev-ensure myproj personal /home/x/projects/myproj
+  _cdev-ensure myproj personal /home/x/projects/myproj
 
   [ -f "$CDEV_REGISTRY" ]
   local total_lines
@@ -30,8 +30,8 @@ teardown() {
 }
 
 @test "cdev-ensure called twice with the same name/account/dir dedups to one line" {
-  cdev-ensure myproj personal /home/x/projects/myproj
-  cdev-ensure myproj personal /home/x/projects/myproj
+  _cdev-ensure myproj personal /home/x/projects/myproj
+  _cdev-ensure myproj personal /home/x/projects/myproj
 
   local matches
   matches=$(grep -cxF "myproj personal /home/x/projects/myproj" "$CDEV_REGISTRY")
@@ -43,8 +43,8 @@ teardown() {
 }
 
 @test "cdev-ensure records distinct sessions as separate lines" {
-  cdev-ensure proj-a personal /home/x/projects/proj-a
-  cdev-ensure proj-b work /home/x/projects/proj-b
+  _cdev-ensure proj-a personal /home/x/projects/proj-a
+  _cdev-ensure proj-b work /home/x/projects/proj-b
 
   local total_lines
   total_lines=$(wc -l < "$CDEV_REGISTRY")

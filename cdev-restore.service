@@ -5,7 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=%h/.cdev-restore-all.sh
+# systemd does not read the shell rc file, so cdev has to be sourced before
+# it can be called. Same entrypoint a human uses, no separate script.
+ExecStart=/bin/bash -c "source %h/.cdev.sh && cdev restore"
 RemainAfterExit=yes
 
 [Install]

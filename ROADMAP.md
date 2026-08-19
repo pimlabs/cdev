@@ -49,14 +49,24 @@ Ships with:
       turned out to need a source step every time.
 - [x] Every internal helper renamed with a leading underscore
       (`_cdev-status`, `_cdev-kill`, `_cdev-init`, and so on), so `cdev` is
-      the sole function meant to be called directly. `cdev-ensure` stays
-      unprefixed, since `cdev-restore-all.sh` calls it by that exact name.
+      the sole function meant to be called directly.
 
 A pre-merge review pass also found and fixed 3 issues before this track
 shipped: a shell-injection path in the tmux launch command, a `cdev-kill`
 bug that could wipe the entire registry on a session name grep couldn't
 parse, and a false-positive workspace-trust diagnosis on a slow session
 start. Full detail in [CHANGELOG.md](CHANGELOG.md).
+
+A follow-up API review after this track shipped found one more exception
+worth closing:
+
+- [x] Fold the two standalone scripts, `cdev-restore-all.sh` and
+      `cdev-healthcheck.sh`, into `cdev.sh` itself as the `cdev restore` and
+      `cdev healthcheck` subcommands, and rename `cdev-ensure` to
+      `_cdev-ensure` now that nothing outside `cdev.sh` calls it by name.
+      `cdev.sh` is now the single source of truth, and `cdev` is the only
+      public function. The systemd units for both now source `~/.cdev.sh`
+      and call the subcommand instead of invoking a standalone script.
 
 ## Known issues (low effort)
 
