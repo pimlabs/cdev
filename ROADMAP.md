@@ -346,6 +346,24 @@ straight to the same corpse every time.
       every existing test that exercises a session that never comes alive
       (one file alone went from 40s to 14.5s once fixed).
 
+The retry above shipped in 0.7.0 and, on the very next real VPS test, never
+actually fired: `_cdev-wait-for-alive` checked immediately with no sleep
+first, and `tmux new-session -d` only waits for the pane to fork, not for
+the command inside to run far enough to fail, so a session dying fast (an
+untrusted directory, exactly the case this retry exists for) could still be
+milliseconds from exiting at that instant. The check read it as alive,
+skipped the whole retry path, and reattached to a pane that died moments
+later, the same bare `[exited]` 0.7.0 was supposed to fix, reproduced and
+confirmed locally with a real tmux server before the fix (not just the
+stubbed tests, which cannot catch a real scheduling race by construction).
+
+- [x] `_cdev-wait-for-alive` now sleeps once before every check, first one
+      included, not only between retries. Verified against real tmux
+      locally (not just stubs) that the fix actually closes the race.
+- [x] Added a regression test asserting the structural guarantee a stub can
+      actually check: `_cdev-wait-for-alive` calls `sleep` at least once
+      even when a stub reports alive on the very first possible check.
+
 ## Bigger scale (high effort, changes project philosophy)
 
 This moves cdev from a small, predictable single-box tool toward a small

@@ -7,7 +7,7 @@
 # `cdev healthcheck` the same way a human would, by the binary's absolute
 # path (%h/.local/bin/cdev).
 
-CDEV_VERSION="0.7.0"
+CDEV_VERSION="0.8.0"
 CDEV_REGISTRY="$HOME/.cdev-sessions"
 CDEV_REGISTRY_LOCK="$CDEV_REGISTRY.lock"
 CDEV_REPO="${CDEV_REPO:-pimlabs/cdev}"
@@ -149,12 +149,26 @@ _cdev-init() {
 # it, so checking once immediately after would misdiagnose a slow/cold-start
 # VPS as a dead session. Shared by _cdev-attach's first attempt and its
 # trust-step retry below, rather than duplicating the loop.
+#
+# Sleeps BEFORE the first check too, deliberately, not just between
+# retries. A real bug found live on a VPS: `new-session -d` only waits for
+# the pane to be forked, not for the command inside it to actually run far
+# enough to fail. A command that dies fast, an untrusted workspace being
+# the common case, can still be a few milliseconds from exiting at the
+# instant an immediate check would run, reading as alive in that brief
+# window and skipping straight to attaching at a pane that dies moments
+# later, no diagnostic printed at all. Giving the command a full interval
+# before the first look closes that race for any realistically fast
+# failure; a session that's genuinely healthy just costs one interval of
+# extra latency once, not on every reattach (a session that was already up
+# skips this function entirely, see _cdev-attach's was_running check).
 _cdev-wait-for-alive() {
   local name="$1" tries=0
   local max_tries="${CDEV_POLL_TRIES:-6}" interval="${CDEV_POLL_INTERVAL:-0.5}"
-  until _cdev-session-alive "$name" || [ "$tries" -ge "$max_tries" ]; do
+  while [ "$tries" -lt "$max_tries" ]; do
     sleep "$interval"
     tries=$((tries + 1))
+    _cdev-session-alive "$name" && return 0
   done
   _cdev-session-alive "$name"
 }
