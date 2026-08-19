@@ -340,18 +340,21 @@ Usage: cdev <name> [account] [dir]
   `cdev -- <name> [account] [dir]`.
 
 Subcommands:
-  status                List running sessions with account, attach state, and uptime.
-  kill <name>           Kill a session and remove it from the reboot registry.
-  init <account> <dir>  One-time interactive login/trust setup for an account.
-  accounts              List configured account config directories.
-  doctor                Show install version and systemd/linger health.
-  restore               Recreate every registered session. Run at boot by
-                        cdev-restore.service, safe to run by hand.
-  healthcheck           Report registered sessions that vanished from tmux.
-                        Run every 5 minutes by cdev-healthcheck.timer, and
-                        silent unless ~/.cdev-notify holds a webhook URL.
-  version               Print the installed cdev version.
-  help                  Show this message.
+  status                   List running sessions with account, attach state,
+                           and uptime.
+  kill <name>              Kill a session and remove it from the reboot
+                           registry.
+  init <account> <dir>     One-time interactive login/trust setup for an
+                           account.
+  accounts                 List configured account config directories.
+  doctor                   Show install version and systemd/linger health.
+  restore                  Recreate every registered session. Run at boot by
+                           cdev-restore.service, safe to run by hand.
+  healthcheck              Report registered sessions that vanished from tmux.
+                           Run every 5 minutes by cdev-healthcheck.timer, and
+                           silent unless ~/.cdev-notify holds a webhook URL.
+  version (--version, -v)  Print the installed cdev version.
+  help (--help, -h)        Show this message.
 EOF
 }
 

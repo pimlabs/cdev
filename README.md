@@ -51,8 +51,8 @@ creating) a project session.
 | `cdev doctor` | Check install health: installed vs repo version, whether the systemd units are enabled/active, and whether linger is on. |
 | `cdev restore` | Recreate every registered session. Run automatically at boot by `cdev-restore.service`; safe to run by hand too, it no-ops on sessions that already exist. |
 | `cdev healthcheck` | Report registered sessions that vanished from tmux without going through `cdev kill`. Run every 5 minutes by `cdev-healthcheck.timer`; silent unless `~/.cdev-notify` holds a webhook URL. |
-| `cdev version` | Print the installed cdev version. |
-| `cdev help` | Show usage and the subcommand list. |
+| `cdev version` (`--version`, `-v`) | Print the installed cdev version. |
+| `cdev help` (`--help`, `-h`) | Show usage and the subcommand list. Also what bare `cdev` prints. |
 
 A project name can't collide with a subcommand word (`status`, `kill`, `init`,
 `accounts`, `doctor`, `restore`, `healthcheck`, `version`, `help`), the same
