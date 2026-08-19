@@ -6,7 +6,7 @@
 # systemd units call `cdev restore` and `cdev healthcheck` the same way a
 # human would, after sourcing this file.
 
-CDEV_VERSION="0.1.0"
+CDEV_VERSION="0.2.0"
 CDEV_REGISTRY="$HOME/.cdev-sessions"
 
 # Map an account to its CLAUDE_CONFIG_DIR. 'personal' uses ~/.claude, any

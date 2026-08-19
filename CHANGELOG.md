@@ -2,10 +2,20 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-19
+
+First tagged release. Everything below was written before any version
+existed, so this entry is the whole history rather than a delta from 0.1.0,
+which was only ever the in-development value of `CDEV_VERSION`.
+
+Upgrading from an install made before this tag: re-run `./install.sh`. The
+old `cdev-status`, `cdev-kill`, `cdev-init`, `cdev-accounts`, and
+`cdev-ensure` function names are gone, use the `cdev <subcommand>` form.
+
 ### Added
 
 - uninstall.sh to remove the cdev install, reversing all install.sh changes to systemd units, shell rc files, and ~/.cdev.sh. Conservative by default, does not kill running tmux sessions (pass --kill-sessions to stop them), keeps the registry and notify file for reinstalls (pass --purge to delete them), and never disables linger
-- Single cdev entrypoint with subcommands (status, kill, init, accounts, doctor, version, help) replacing five separate function names
+- Single cdev entrypoint with subcommands (status, kill, init, accounts, doctor, restore, healthcheck, version, help) replacing the separate top-level function names
 - Workspace-trust failure detection and explanation in cdev-attach, replacing bare tmux exit message
 - Uptime column in cdev status showing session duration
 - cdev doctor subcommand for comparing installed vs repo version and checking systemd/linger state
@@ -29,3 +39,6 @@
 - `cdev --version` and `cdev -v` now print the version. They were not dispatcher cases, so they fell through to the default action and were registered as a project literally named `--version`. Any other unrecognized flag is now rejected with an error instead of being taken as a session name; `cdev -- <name>` remains the way to use a genuinely dash-named project
 - `_cdev-ensure`'s dedup check now passes `--` to grep. Without it a registry line starting with a dash was read by grep as its own options, so the check failed and the line was appended again on every call
 - `_cdev-restore` iterates over a snapshot of the registry rather than the live file. Combined with the dedup bug above, reading the file while `_cdev-ensure` appended to it turned the loop into one that never ended and a registry that grew without limit (a real run reached 12,657 identical lines)
+
+[Unreleased]: https://github.com/pimlabs/cdev/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/pimlabs/cdev/releases/tag/v0.2.0
