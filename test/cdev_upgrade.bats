@@ -83,3 +83,57 @@ exit 0
   # session named "upgrade". Confirm that never happened.
   [ ! -f "$CDEV_REGISTRY" ] || ! grep -q '^upgrade ' "$CDEV_REGISTRY"
 }
+
+# A curl stub for the actual download path (resolved tag differs from
+# CDEV_VERSION, so _cdev-upgrade proceeds past the already-latest check):
+# resolves to v9.9.9, serves arbitrary tarball bytes (never extracted,
+# since checksum verification has to reject it first), and serves a
+# SHA256SUMS whose source.tar.gz entry is a well-formed but wrong hash, the
+# same shape a tampered or corrupted download would have.
+stub_curl_checksum_mismatch() {
+  write_stub curl '
+echo "$@" >> "$CURL_LOG"
+url=""
+outfile=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o)
+      outfile="$2"
+      shift 2
+      ;;
+    http*)
+      url="$1"
+      shift
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+case "$url" in
+  *releases/latest*)
+    echo "https://github.com/pimlabs/cdev/releases/tag/v9.9.9"
+    ;;
+  *archive/refs/tags/*)
+    echo "not a real tarball" > "$outfile"
+    ;;
+  *SHA256SUMS)
+    echo "0000000000000000000000000000000000000000000000000000000000000000  source.tar.gz" > "$outfile"
+    ;;
+  *)
+    echo "stub curl: unexpected request: $*" >&2
+    exit 1
+    ;;
+esac
+'
+}
+
+@test "cdev upgrade aborts on a checksum mismatch and never runs install.sh" {
+  stub_curl_checksum_mismatch
+
+  run cdev upgrade
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"checksum mismatch"* ]]
+  [[ "$output" != *"Upgraded."* ]]
+}

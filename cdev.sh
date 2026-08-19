@@ -8,6 +8,7 @@
 
 CDEV_VERSION="0.2.0"
 CDEV_REGISTRY="$HOME/.cdev-sessions"
+CDEV_REGISTRY_LOCK="$CDEV_REGISTRY.lock"
 CDEV_REPO="${CDEV_REPO:-pimlabs/cdev}"
 
 # Map an account to its CLAUDE_CONFIG_DIR. 'personal' uses ~/.claude, any
@@ -20,6 +21,43 @@ _cdev-config-dir() {
   else
     echo "$HOME/.claude-$account"
   fi
+}
+
+# Runs "$@" with the registry file locked, so a concurrent append
+# (_cdev-ensure), removal (_cdev-kill), or restore step can't interleave and
+# corrupt the file or resurrect a line another call just removed. Falls back
+# to running unlocked when flock isn't available (this box's local dev
+# machine has none; every target VPS does, it ships in util-linux), which is
+# no worse than before this existed.
+#
+# Never nest two calls to this function: flock's lock is per open-file-
+# description, not reentrant across nested subshells on the same process
+# tree, so an outer _cdev-registry-locked call would block forever waiting
+# for an inner one to release a lock it can never acquire. Two separate,
+# sequential calls are fine, one call wrapping another is a deadlock.
+_cdev-registry-locked() {
+  if command -v flock >/dev/null 2>&1; then
+    (
+      flock -x 200
+      "$@"
+    ) 200>"$CDEV_REGISTRY_LOCK"
+  else
+    "$@"
+  fi
+}
+
+# The append half of _cdev-ensure, run under _cdev-registry-locked so it
+# can't interleave with a concurrent _cdev-kill's read-modify-write.
+_cdev-ensure-append() {
+  local name="$1" account="$2" dir="$3"
+  touch "$CDEV_REGISTRY"
+  # The `--` matters: without it a registry line starting with a dash makes
+  # grep read the line as its own options, fail, and take the `||` branch,
+  # so the line is appended again on every single call. Paired with
+  # _cdev-restore reading this same file line by line, that turns into a
+  # loop that never ends and a registry that grows without limit.
+  grep -qxF -- "$name $account $dir" "$CDEV_REGISTRY" ||
+    echo "$name $account $dir" >> "$CDEV_REGISTRY"
 }
 
 # Create the tmux + Remote Control session if it doesn't already exist, and
@@ -49,14 +87,7 @@ _cdev-ensure() {
     tmux set-environment -t "$name" CDEV_ACCOUNT "$account"
   fi
 
-  touch "$CDEV_REGISTRY"
-  # The `--` matters: without it a registry line starting with a dash makes
-  # grep read the line as its own options, fail, and take the `||` branch,
-  # so the line is appended again on every single call. Paired with
-  # _cdev-restore reading this same file line by line, that turns into a
-  # loop that never ends and a registry that grows without limit.
-  grep -qxF -- "$name $account $dir" "$CDEV_REGISTRY" ||
-    echo "$name $account $dir" >> "$CDEV_REGISTRY"
+  _cdev-registry-locked _cdev-ensure-append "$name" "$account" "$dir"
 }
 
 # One-time interactive login for an account, run inside the target project
@@ -83,11 +114,13 @@ _cdev-init() {
 }
 
 # Interactive entry point: log the account in first if needed, ensure the
-# session exists, then attach to it. This is the default action of the
-# `cdev` dispatcher, so `cdev <name> [account] [dir]` still works as before.
+# session exists, then attach to it. Reached via `cdev open <name>
+# [account] [dir]` (and the older `cdev -- <name> [account] [dir]` escape
+# hatch), never via a bare unrecognized word any more, so a name never has
+# to avoid colliding with a subcommand.
 _cdev-attach() {
   if [ -z "${1:-}" ]; then
-    echo "Usage: cdev <project-name> [account] [dir]"
+    echo "Usage: cdev open <project-name> [account] [dir]"
     return 1
   fi
   local name="$1"
@@ -173,6 +206,26 @@ _cdev-status() {
   done
 }
 
+# The registry-removal half of _cdev-kill, run under _cdev-registry-locked.
+# Uses awk instead of grep -v: the previous `grep -vF -- "$name "` matched
+# the name as a SUBSTRING anywhere in the line (account or dir field
+# included), so killing "foo" could also silently drop an unrelated line
+# whose dir happened to contain the literal text "foo ". awk's $1 is exactly
+# the name field (the first whitespace-delimited token, regardless of
+# spaces later in the dir field, since $1 stops at the first delimiter),
+# compared with plain string equality, never treated as a pattern.
+_cdev-kill-remove() {
+  local name="$1"
+  [ -f "$CDEV_REGISTRY" ] || return 0
+  awk -v name="$name" '$1 != name' "$CDEV_REGISTRY" > "$CDEV_REGISTRY.tmp"
+  local awk_status=$?
+  if [ "$awk_status" -eq 0 ]; then
+    mv "$CDEV_REGISTRY.tmp" "$CDEV_REGISTRY"
+  else
+    rm -f "$CDEV_REGISTRY.tmp"
+  fi
+}
+
 # Kill a session AND remove it from the registry, so it does not come back
 # on the next reboot. A session stopped some other way (crash, VPS restart)
 # stays in the registry and gets recreated by `cdev restore`.
@@ -182,24 +235,22 @@ _cdev-kill() {
     return 1
   fi
   tmux kill-session -t "$1" 2>/dev/null && echo "Session '$1' killed." || echo "Session '$1' not found."
-  # grep -v into a temp file, then replace: portable across BSD and GNU
-  # sed/grep, unlike `sed -i` whose in-place flag takes a mandatory backup
-  # suffix argument on BSD sed (macOS) and none on GNU sed, so a single
-  # `sed -i EXPR FILE` invocation cannot work on both. -F matches the name
-  # as a literal string, not a regex: a name containing regex metacharacters
-  # (brackets, dots, etc.) used to make grep fail to parse the pattern and
-  # write nothing, which the unconditional mv below then turned into wiping
-  # every other session out of the registry. The exit-status check below is
-  # belt and suspenders in case grep still errors for some other reason.
-  if [ -f "$CDEV_REGISTRY" ]; then
-    grep -vF -- "$1 " "$CDEV_REGISTRY" > "$CDEV_REGISTRY.tmp"
-    local grep_status=$?
-    if [ "$grep_status" -le 1 ]; then
-      mv "$CDEV_REGISTRY.tmp" "$CDEV_REGISTRY"
-    else
-      rm -f "$CDEV_REGISTRY.tmp"
-    fi
-  fi
+  _cdev-registry-locked _cdev-kill-remove "$1"
+}
+
+# Checked under _cdev-registry-locked right before _cdev-restore recreates
+# each snapshot entry, so a `cdev kill` that ran after the snapshot was
+# taken (but before the loop reached this entry) is honoured instead of
+# silently undone. This doesn't close the race completely, a kill landing
+# in the gap between this check and the _cdev-ensure call right after it
+# can still slip through, but it shrinks the window from "the whole restore
+# run" to one fast file check, which is the reasonable stopping point for a
+# check-then-act pattern without full transactional locking across both
+# operations.
+_cdev-restore-still-registered() {
+  local name="$1"
+  [ -f "$CDEV_REGISTRY" ] || return 1
+  awk -v name="$name" '$1 == name { found=1 } END { exit !found }' "$CDEV_REGISTRY"
 }
 
 # Recreate every registered session. Run at boot by cdev-restore.service,
@@ -220,6 +271,9 @@ _cdev-restore() {
   snapshot=$(cat "$CDEV_REGISTRY")
   while read -r name account dir; do
     [ -z "$name" ] && continue
+    if ! _cdev-registry-locked _cdev-restore-still-registered "$name"; then
+      continue
+    fi
     if ! _cdev-ensure "$name" "$account" "$dir"; then
       failed=$((failed + 1))
     fi
@@ -285,6 +339,21 @@ _cdev-latest-tag() {
   esac
 }
 
+# Portable sha256: Linux ships sha256sum, macOS ships shasum -a 256, prefer
+# whichever exists rather than assuming one. Prints the hex digest only.
+# install.sh carries its own copy of this, cdev_sha256, for the same reason
+# it carries its own copy of the tag-resolution logic: it has to run before
+# cdev.sh is on the box at all, so the two cannot share code.
+_cdev-sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
 # Move this box to the latest release. Exists because an install made with
 # `curl ... | bash` has no checkout, so there is no `git pull` to run.
 _cdev-upgrade() {
@@ -318,10 +387,55 @@ _cdev-upgrade() {
   local work
   work=$(mktemp -d) || return 1
 
+  # Downloaded to a file rather than piped straight into tar, so the
+  # checksum below can verify the exact bytes before anything is unpacked.
   if ! curl -fsSL --connect-timeout 5 --max-time 120 \
-    "https://github.com/$CDEV_REPO/archive/refs/tags/$tag.tar.gz" |
-    tar -xz -C "$work" --strip-components=1; then
-    echo "cdev upgrade: could not download or unpack $tag." >&2
+    "https://github.com/$CDEV_REPO/archive/refs/tags/$tag.tar.gz" \
+    -o "$work/source.tar.gz"; then
+    echo "cdev upgrade: could not download $tag." >&2
+    rm -rf "$work"
+    return 1
+  fi
+
+  echo "Verifying checksum..."
+  if ! curl -fsSL --connect-timeout 5 --max-time 20 \
+    "https://github.com/$CDEV_REPO/releases/download/$tag/SHA256SUMS" \
+    -o "$work/SHA256SUMS"; then
+    echo "cdev upgrade: could not download SHA256SUMS for $tag, aborting." >&2
+    echo "This is what protects the downloaded archive against tampering." >&2
+    rm -rf "$work"
+    return 1
+  fi
+
+  local expected actual
+  # A single awk rather than grep piped into awk, matching install.sh's
+  # cdev_sha256 sibling: grep exiting 1 on no match plus a pipe would make
+  # this assignment fail too under a stricter caller, and it is simpler
+  # besides, one command instead of two.
+  expected="$(awk '$0 ~ / source\.tar\.gz$/ {print $1}' "$work/SHA256SUMS")"
+  if [ -z "$expected" ]; then
+    echo "cdev upgrade: SHA256SUMS for $tag has no entry for source.tar.gz, aborting." >&2
+    rm -rf "$work"
+    return 1
+  fi
+
+  actual="$(_cdev-sha256 "$work/source.tar.gz")" || {
+    echo "cdev upgrade: no sha256sum or shasum available to verify the download." >&2
+    rm -rf "$work"
+    return 1
+  }
+
+  if [ "$expected" != "$actual" ]; then
+    echo "cdev upgrade: checksum mismatch for $tag, refusing to install." >&2
+    echo "  expected: $expected" >&2
+    echo "  actual:   $actual" >&2
+    rm -rf "$work"
+    return 1
+  fi
+  echo "Checksum OK."
+
+  if ! tar -xz -C "$work" --strip-components=1 -f "$work/source.tar.gz"; then
+    echo "cdev upgrade: could not unpack $tag." >&2
     rm -rf "$work"
     return 1
   fi
@@ -590,14 +704,18 @@ _cdev-help() {
   echo "cdev $CDEV_VERSION"
   echo ""
   cat <<'EOF'
-Usage: cdev <name> [account] [dir]
+Usage: cdev open <name> [account] [dir]
   Attaches to (creating if needed) a persistent session for <name>.
   account defaults to 'personal', mapping to ~/.claude-<account>.
   dir defaults to ~/projects/<name>.
-  If <name> collides with a subcommand word below, force attach mode with
-  `cdev -- <name> [account] [dir]`.
+  `cdev -- <name> [account] [dir]` is an older equivalent, still works,
+  kept for anyone already using it.
 
 Subcommands:
+  open <name> [account] [dir]
+                           Create (if needed) and attach to a session.
+                           account defaults to 'personal', dir defaults to
+                           ~/projects/<name>.
   status                   List running sessions with account, attach state,
                            and uptime.
   kill <name>              Kill a session and remove it from the reboot
@@ -622,13 +740,18 @@ Subcommands:
 EOF
 }
 
-# Single entrypoint. Routes to the functions above; anything not recognized
-# as a subcommand falls through to _cdev-attach, so `cdev <name> ...` still
-# works exactly as the old top-level `cdev` function did.
+# Single entrypoint. Routes to the functions above; `cdev open <name>
+# [account] [dir]` (or the older `cdev -- <name> ...`) is the only way to
+# reach _cdev-attach now, an unrecognized word is an error rather than an
+# implicit project name.
 cdev() {
   local sub="${1:-}"
   case "$sub" in
     --)
+      shift
+      _cdev-attach "$@"
+      ;;
+    open)
       shift
       _cdev-attach "$@"
       ;;
@@ -675,16 +798,24 @@ cdev() {
       _cdev-help
       ;;
     -*)
-      # Anything else that looks like a flag is a typo, not a project. The
-      # fallthrough below would otherwise treat it as a session name and
-      # register it, which is how `cdev --version` used to end up in the
-      # registry as a project called "--version".
+      # A dedicated case rather than letting this fall through to the
+      # generic *) below: the message here is specific to flag typos, and
+      # points at `cdev -- $sub` for a genuinely dash-named project, which
+      # the generic "not a recognized subcommand" message below does not
+      # know to suggest.
       echo "cdev: unknown option '$sub'" >&2
       echo "Run 'cdev help' for usage, or 'cdev -- $sub' to use it as a project name." >&2
       return 1
       ;;
     *)
-      _cdev-attach "$@"
+      # No more implicit attach-by-bare-word: a project name that happened
+      # to match nothing above used to silently register and attach, which
+      # is exactly the collision risk this exists to avoid (see CLAUDE.md /
+      # ROADMAP.md). Say so explicitly instead of guessing.
+      echo "cdev: '$sub' isn't a recognized subcommand." >&2
+      echo "Run 'cdev open $sub' to create or attach to a session named '$sub'," >&2
+      echo "or 'cdev help' for the full subcommand list." >&2
+      return 1
       ;;
   esac
 }

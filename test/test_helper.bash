@@ -10,9 +10,18 @@ CDEV_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Create a temp directory, prepend it to PATH, and remember it in $STUB_BIN
 # so write_stub can drop fake executables into it and teardown can remove it.
+# Also drops in a flock stub straight away: this dev machine has no real
+# flock at all (macOS, verified with `command -v flock`), while every
+# target VPS does (util-linux). Without a stub every test would silently
+# exercise cdev.sh's unlocked fallback path instead of the locked one that
+# actually runs in production, so `command -v flock` has to succeed here.
+# The stub does no real locking, it just runs "flock -x 200" as a no-op and
+# lets the command after it run, which is enough to exercise the locked
+# code path (see _cdev-registry-locked in cdev.sh) without a real lock.
 stub_bin_dir() {
   STUB_BIN="$(mktemp -d)"
   PATH="$STUB_BIN:$PATH"
+  write_stub flock 'exit 0'
 }
 
 # write_stub <name> <body>

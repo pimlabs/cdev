@@ -64,21 +64,32 @@ past the session.
 
 Everything lives in one file, `cdev.sh` (sourced into `~/.bashrc` at install
 time). `cdev()` is the dispatcher and the only function meant to be called
-directly, the sole public entrypoint: it routes `cdev status`, `cdev kill`,
-`cdev init`, `cdev accounts`, `cdev doctor`, `cdev upgrade`, `cdev restore`,
-`cdev healthcheck`, `cdev uninstall`, `cdev version`, and `cdev help` to
-underscore-prefixed
-internal functions (`_cdev-status`, `_cdev-kill`, `_cdev-init`,
+directly, the sole public entrypoint: it routes `cdev open`, `cdev status`,
+`cdev kill`, `cdev init`, `cdev accounts`, `cdev doctor`, `cdev upgrade`,
+`cdev restore`, `cdev healthcheck`, `cdev uninstall`, `cdev version`, and
+`cdev help` to underscore-prefixed internal functions (`_cdev-attach`,
+`_cdev-status`, `_cdev-kill`, `_cdev-kill-remove`, `_cdev-init`,
 `_cdev-accounts`, `_cdev-doctor`, `_cdev-doctor-unit`, `_cdev-upgrade`,
-`_cdev-latest-tag`, `_cdev-restore`, `_cdev-healthcheck`, `_cdev-uninstall`,
-`_cdev-help`, `_cdev-format-duration`, `_cdev-config-dir`, `_cdev-ensure`),
-and falls
-through to `_cdev-attach` for anything else, so `cdev <name> [account] [dir]`
-still works exactly as the
-old top-level `cdev` function did. The leading underscore marks every one of
-these as implementation detail, not a supported interface, so nothing outside
-`cdev.sh` itself should call them by name. There is no exception any more:
-`cdev` is the only function in the file without the underscore prefix.
+`_cdev-sha256`, `_cdev-latest-tag`, `_cdev-restore`,
+`_cdev-restore-still-registered`, `_cdev-healthcheck`, `_cdev-uninstall`,
+`_cdev-help`, `_cdev-format-duration`, `_cdev-config-dir`, `_cdev-ensure`,
+`_cdev-ensure-append`, `_cdev-registry-locked`). `cdev open <name> [account]
+[dir]` is the only way to reach `_cdev-attach`, alongside the older `cdev --
+<name> [account] [dir]` escape hatch kept for anyone already using it.
+Before `cdev open` existed, an unrecognized word fell through to
+`_cdev-attach` and was silently created and attached to as a project
+session, so a project could never safely be named `status`, `kill`,
+`doctor`, or any other subcommand word, exactly the short, ordinary words
+someone would plausibly pick for a real project, and the list only grows as
+more subcommands get added. The `*)` fallthrough now prints an error
+pointing at `cdev open $sub` instead of guessing, so `cdev open status`
+always means attach to a session named `status`, whatever else `status`
+means as a bare subcommand, closing that collision class entirely rather
+than documenting it as a trade-off to accept. The leading underscore marks
+every one of these as implementation detail, not a supported interface, so
+nothing outside `cdev.sh` itself should call them by name. There is no
+exception any more: `cdev` is the only function in the file without the
+underscore prefix.
 
 - `_cdev-attach` holds the login-then-ensure-then-tmux-attach logic that used
   to live directly in `cdev`.
@@ -95,8 +106,9 @@ these as implementation detail, not a supported interface, so nothing outside
   because an install made with the one-line `curl | bash` command has no
   checkout, so there is no `git pull`. It resolves the latest tag, prints
   "Already on the latest release" and stops if it matches `v$CDEV_VERSION`,
-  otherwise downloads that tag's tarball and runs its `install.sh`. It
-  deliberately does not decide which version is newer, comparing version
+  otherwise downloads that tag's tarball, verifies it against `SHA256SUMS`
+  (see below), and runs its `install.sh`. It deliberately does not decide
+  which version is newer, comparing version
   strings portably is more machinery than it is worth, so it prints both and
   installs what the project currently publishes. Afterwards it reminds the
   user that their current shell still holds the old functions until they
@@ -152,6 +164,39 @@ matching line; anything that dies some other way (crash, reboot) simply stays
 in the file and gets recreated on the next `cdev restore`, or flagged by
 `cdev healthcheck` if notifications are configured.
 
+`_cdev-ensure` (appends), `_cdev-kill` (read-modify-write), and
+`_cdev-restore` (reads a snapshot, then loops calling `_cdev-ensure`) can all
+run concurrently, a human's interactive shell, the boot-time
+`cdev-restore.service`, the 5-minute `cdev-healthcheck.timer`, or two
+interactive shells at once, so all three now go through
+`_cdev-registry-locked`, which runs its arguments under `flock -x` on
+`$CDEV_REGISTRY_LOCK`. Without it, an append landing between `_cdev-kill`'s
+read and its `mv` gets silently discarded, two concurrent `cdev kill` calls
+can resurrect each other's just-removed line, and `cdev restore` can recreate
+(and re-append) an entry a human killed after the snapshot was taken but
+before the loop reached it; `_cdev-restore-still-registered` guards against
+that last one specifically, a locked, read-only registry check `_cdev-restore`
+runs immediately before each `_cdev-ensure` call, which narrows that race from
+the whole restore run down to one fast file check (not a complete fix, full
+transactional locking across both operations would be needed for that).
+`flock` is guarded with `command -v`, falling back to running unlocked when
+it is absent, because this project's own dev/test machine (macOS) has none
+at all while every target VPS does (util-linux ships it), and unlocked is no
+worse than before this existed. **Never nest two `_cdev-registry-locked`
+calls**: the lock is per open-file-description, not reentrant across nested
+subshells on the same process tree, so an outer call would block forever
+waiting for an inner call to release a lock it can never acquire. That is
+why `_cdev-restore`'s loop runs the still-registered check and `_cdev-ensure`
+(which locks internally via `_cdev-ensure-append`) as two separate,
+sequential calls rather than one wrapping the other, keep that shape if this
+is touched again. `_cdev-kill`'s registry removal, `_cdev-kill-remove`, was
+fixed alongside the locking: the old `grep -vF -- "$1 "` matched the name as
+a substring anywhere in the line, so killing session `foo` could also
+silently drop an unrelated line whose account or dir field merely contained
+the literal text `foo ` (a dir `/home/x/foo bar`, say). It now uses
+`awk -v name="$1" '$1 != name'`, comparing only the first field with plain
+string equality.
+
 At the bottom of `cdev.sh`, a check lets `./cdev.sh <args>` work directly,
 not only via `source cdev.sh` then `cdev <args>`. It uses `(return 0
 2>/dev/null)`, which succeeds only inside a function or a sourced file, to
@@ -180,16 +225,38 @@ install.sh installs exactly as before. Piped straight from the network, as in
 `curl -fsSL https://cdev.pimlabs.id/install | bash`, there is no sibling file
 at all, so install.sh resolves the newest release tag with the same
 redirect-following logic as `_cdev-latest-tag` above (its own copy, named
-`cdev_latest_tag`), downloads that tag's tarball from GitHub, extracts it to
-a temp directory with `--strip-components=1`, and hands over with
-`CDEV_BOOTSTRAPPED=1 exec bash "$work/install.sh"`. The mode decision looks
-for the payload files rather than inspecting `$0` or `BASH_SOURCE`,
-deliberately: a payload check reads the same however the script was invoked,
-and it is what stops the hand-off from looping, since the extracted copy
-does find its own payload and installs on that pass instead of downloading
-again. `CDEV_BOOTSTRAPPED` is the second, belt-and-braces guard against the
-same loop. Piped installs require `curl` and `tar` and say so clearly if
-either is missing.
+`cdev_latest_tag`), downloads that tag's tarball from GitHub to a file,
+verifies it (see below), extracts it to a temp directory with
+`--strip-components=1`, and hands over with `CDEV_BOOTSTRAPPED=1 exec bash
+"$work/install.sh"`. The mode decision looks for the payload files rather
+than inspecting `$0` or `BASH_SOURCE`, deliberately: a payload check reads
+the same however the script was invoked, and it is what stops the hand-off
+from looping, since the extracted copy does find its own payload and
+installs on that pass instead of downloading again. `CDEV_BOOTSTRAPPED` is
+the second, belt-and-braces guard against the same loop. Piped installs
+require `curl`, `tar`, and either `sha256sum` or `shasum`, and say so
+clearly if any is missing.
+
+Both this piped-install path and `_cdev-upgrade` now verify that downloaded
+tarball against a `SHA256SUMS` file before extracting anything, downloading
+to a file first rather than piping straight into `tar`, since there has to
+be something on disk to checksum before it can be unpacked. A checksum
+mismatch, or a `SHA256SUMS` that can't be fetched at all, aborts with a
+clear message rather than installing anyway. `_cdev-sha256` in `cdev.sh`
+(`cdev_sha256` in `install.sh`, same underscore-dash-vs-plain naming split as
+`_cdev-latest-tag` / `cdev_latest_tag` above, and for the same reason,
+`install.sh` has to work before `cdev.sh` is on the box at all) prefers
+`sha256sum` (Linux) and falls back to `shasum -a 256` (macOS), since neither
+is guaranteed present on both. `SHA256SUMS` itself is computed in CI (see
+Releasing below) from the exact same tarball URL the installer fetches,
+rather than trusted from anything GitHub reports about the tarball, which is
+what makes it an independent check of the bytes that actually arrived over
+the wire rather than a value that could be wrong for the same reason the
+download itself could be. Be honest about what this does and does not cover:
+it defends against a corrupted or tampered-with download in transit, nothing
+more. It does not verify who built the release or that the release pipeline
+itself wasn't compromised, that would need signing, which this does not
+attempt.
 
 ## Releasing
 
@@ -209,14 +276,19 @@ install is stale without telling them what changed.
 
 Pushing the tag is enough to publish the release itself. `.github/workflows/release.yml`
 watches for `v*` tag pushes and publishes the GitHub Release, attaching
-`install.sh` as an asset, automatically, so this is not a step a maintainer
-does by hand. That asset is what makes `/releases/latest/download/install.sh`
-resolve, which is the documented one-line install URL. If that workflow ever
-stops attaching the asset, the advertised one-liner 404s for everyone while
-the release itself still looks perfectly fine, nothing else in the release
-process would catch it. The existing `v0.2.0` tag was pushed before this
-workflow existed, so it has no Release object and no asset; the one-line
-install only starts working from the next tagged release onward.
+`install.sh` and `SHA256SUMS` as assets, automatically, so this is not a
+step a maintainer does by hand. The `install.sh` asset is what makes
+`/releases/latest/download/install.sh` resolve, which is the documented
+one-line install URL. If that workflow ever stops attaching it, the
+advertised one-liner 404s for everyone while the release itself still looks
+perfectly fine, nothing else in the release process would catch it.
+`SHA256SUMS` is computed in the same job, from the same tarball URL
+`install.sh` and `cdev upgrade` download, plus a hash of `install.sh` itself,
+before either asset is uploaded, see the checksum-verification paragraph
+above for why it is computed here rather than trusted from GitHub. The
+existing `v0.2.0` tag was pushed before this workflow existed, so it has no
+Release object and no assets; the one-line install only starts working from
+the next tagged release onward.
 
 Pre-1.0, so a breaking change bumps the minor, not the major. Renaming or
 removing anything a user types (a subcommand, a flag) or anything an

@@ -54,6 +54,33 @@ teardown() {
   grep -qxF -- "--weird personal $TEST_HOME/p" "$CDEV_REGISTRY"
 }
 
+@test "cdev -- <ordinary-name> still works as the legacy escape hatch" {
+  # Not just for flag-like names: `cdev -- <name>` was the only way to
+  # force attach mode even for an ordinary name that collided with a
+  # subcommand word, before `cdev open` existed. It has to keep working
+  # for anyone already using it.
+  run cdev -- myproject personal "$TEST_HOME/p"
+  grep -qxF -- "myproject personal $TEST_HOME/p" "$CDEV_REGISTRY"
+}
+
+@test "cdev open <name> reaches _cdev-attach the same way the old bare cdev <name> did" {
+  run cdev open myproject personal "$TEST_HOME/p"
+  grep -qxF -- "myproject personal $TEST_HOME/p" "$CDEV_REGISTRY"
+}
+
+@test "a bare unrecognized word is rejected instead of silently attaching" {
+  # This is the collision risk cdev open exists to close: status, kill,
+  # doctor, and so on are exactly the kind of short, ordinary word someone
+  # would pick as a real project name. A bare `cdev myproject` must no
+  # longer create or attach to anything.
+  run cdev myproject
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"isn't a recognized subcommand"* ]]
+  [[ "$output" == *"cdev open myproject"* ]]
+
+  [ ! -f "$CDEV_REGISTRY" ] || ! grep -q '^myproject ' "$CDEV_REGISTRY"
+}
+
 @test "_cdev-ensure dedups a registry line that starts with a dash" {
   _cdev-ensure -- -dashname personal "$TEST_HOME/p" || true
   _cdev-ensure -dashname personal "$TEST_HOME/p" || true

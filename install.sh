@@ -41,6 +41,21 @@ cdev_latest_tag() {
   esac
 }
 
+# Portable sha256: Linux ships sha256sum, macOS ships shasum -a 256, prefer
+# whichever exists rather than assuming one. Prints the hex digest only.
+# cdev.sh carries its own copy of this, _cdev-sha256, for the same reason it
+# carries its own copy of cdev_latest_tag above: install.sh has to run
+# before cdev.sh is on the box at all, so the two cannot share code.
+cdev_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    return 1
+  fi
+}
+
 # Am I running from a checkout, or piped in on my own? Answered by looking
 # for the payload rather than by inspecting $0 or BASH_SOURCE: what matters
 # is whether the files are reachable, and that check reads the same however
@@ -70,6 +85,11 @@ if [ "$have_payload" -eq 0 ]; then
     }
   done
 
+  if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+    echo "install: sha256sum or shasum is required to verify the download." >&2
+    exit 1
+  fi
+
   echo "Resolving the latest cdev release..."
   tag=$(cdev_latest_tag) || {
     echo "install: could not resolve the latest release of $CDEV_REPO." >&2
@@ -81,11 +101,49 @@ if [ "$have_payload" -eq 0 ]; then
   work="$(mktemp -d)"
   trap 'rm -rf "$work"' EXIT
 
+  # Downloaded to a file rather than piped straight into tar, so the
+  # checksum below can verify the exact bytes before anything is unpacked.
+  curl -fsSL --connect-timeout 5 --max-time 120 \
+    "https://github.com/$CDEV_REPO/archive/refs/tags/$tag.tar.gz" \
+    -o "$work/source.tar.gz"
+
+  echo "Verifying checksum..."
+  if ! curl -fsSL --connect-timeout 5 --max-time 20 \
+    "https://github.com/$CDEV_REPO/releases/download/$tag/SHA256SUMS" \
+    -o "$work/SHA256SUMS"; then
+    echo "install: could not download SHA256SUMS for $tag, aborting." >&2
+    echo "This is what protects the downloaded archive against tampering." >&2
+    exit 1
+  fi
+
+  # A single awk rather than grep piped into awk: under this script's
+  # set -e -o pipefail, a grep that matches nothing exits 1, and pipefail
+  # would make the whole pipeline (and this assignment) exit non-zero too,
+  # aborting the script right here instead of reaching the intentional
+  # "no entry for source.tar.gz" message below. awk finds no match and
+  # still exits 0, which is what makes the check below reachable at all.
+  expected="$(awk '$0 ~ / source\.tar\.gz$/ {print $1}' "$work/SHA256SUMS")"
+  if [ -z "$expected" ]; then
+    echo "install: SHA256SUMS for $tag has no entry for source.tar.gz, aborting." >&2
+    exit 1
+  fi
+
+  actual="$(cdev_sha256 "$work/source.tar.gz")" || {
+    echo "install: no sha256sum or shasum available to verify the download." >&2
+    exit 1
+  }
+
+  if [ "$expected" != "$actual" ]; then
+    echo "install: checksum mismatch for $tag, refusing to install." >&2
+    echo "  expected: $expected" >&2
+    echo "  actual:   $actual" >&2
+    exit 1
+  fi
+  echo "Checksum OK."
+
   # --strip-components=1 so this does not depend on the name GitHub gives the
   # directory inside the archive, which is the tag minus its leading v.
-  curl -fsSL --connect-timeout 5 --max-time 120 \
-    "https://github.com/$CDEV_REPO/archive/refs/tags/$tag.tar.gz" |
-    tar -xz -C "$work" --strip-components=1
+  tar -xz -C "$work" --strip-components=1 -f "$work/source.tar.gz"
 
   [ -f "$work/install.sh" ] || {
     echo "install: the $tag tarball has no install.sh, aborting." >&2

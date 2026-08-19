@@ -73,6 +73,40 @@ worth closing:
       public function. The systemd units for both now source `~/.cdev.sh`
       and call the subcommand instead of invoking a standalone script.
 
+A 6-reviewer architecture council pass on 19 August 2026 found 4 more issues,
+closing the trade-off two paragraphs up for good rather than continuing to
+live with it, plus three registry bugs the earlier review passes didn't
+catch:
+
+- [x] `cdev open <name> [account] [dir]` replaces bare `cdev <name>` as the
+      only path to attach mode, so the "trade-off to accept" above no longer
+      applies at all: a project can be named `status`, `doctor`, or any other
+      subcommand word and `cdev open <name>` still attaches to it correctly.
+      An unrecognized bare word is now a plain error pointing at
+      `cdev open`. `cdev -- <name> [account] [dir]` stays working as an
+      older, now-secondary equivalent.
+- [x] `_cdev-kill`'s registry removal matched the session name as a
+      substring anywhere in the line (`grep -vF -- "$1 "`), not just the
+      name field, so killing one session could silently drop an unrelated
+      line whose account or dir field happened to contain the same text.
+      Rewritten with `awk` matching only the first field.
+- [x] Three registry races: an `_cdev-ensure` append landing mid-`_cdev-kill`
+      and getting discarded, two concurrent `cdev kill` calls each
+      resurrecting the line the other had just removed, and `cdev restore`
+      recreating a session a human killed after its snapshot was taken.
+      Fixed with `flock`-based locking around every registry read and
+      write, falling back to running unlocked when `flock` isn't on `PATH`
+      (this project's own dev/test machine has none, every target VPS does,
+      it ships in util-linux).
+- [x] SHA256SUMS checksum verification for the tarball `install.sh` and
+      `cdev upgrade` both download, extending the one-line install track
+      below rather than sitting apart from it: computed in CI from the same
+      URL the installer fetches, checked before anything is extracted, and
+      install aborts with a clear message on a mismatch instead of
+      proceeding anyway.
+
+Full detail in [CHANGELOG.md](CHANGELOG.md).
+
 ## Known issues (low effort)
 
 Both already documented as pain points in README's "Known issues" section.
@@ -158,6 +192,11 @@ Until then, `curl -fsSL https://github.com/pimlabs/cdev/releases/latest/download
 is the working one-liner. Also worth knowing: the existing `v0.2.0` tag was
 pushed before the release workflow existed, so it has no release asset.
 The one-liner starts working from the next tagged release onward.
+
+The 19 August 2026 architecture council pass under the single-entrypoint
+track above added checksum verification to this download: both the piped
+install and `cdev upgrade` now check the tarball against a `SHA256SUMS`
+release asset before extracting it.
 
 ## Bigger scale (high effort, changes project philosophy)
 

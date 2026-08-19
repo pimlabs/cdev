@@ -1,13 +1,20 @@
 name: release
 
-# Publishes the GitHub Release for a tag and attaches install.sh to it.
+# Publishes the GitHub Release for a tag and attaches install.sh and
+# SHA256SUMS to it.
 #
-# The attachment is what makes the advertised one-line install work:
-# /releases/latest/download/install.sh only resolves if install.sh is an
-# asset of the newest release. Automated rather than left as a release-day
-# step on purpose, since forgetting it does not break the release, it breaks
-# the install URL for everyone, and nothing about the release itself looks
-# wrong when that happens.
+# The install.sh attachment is what makes the advertised one-line install
+# work: /releases/latest/download/install.sh only resolves if install.sh is
+# an asset of the newest release. Automated rather than left as a
+# release-day step on purpose, since forgetting it does not break the
+# release, it breaks the install URL for everyone, and nothing about the
+# release itself looks wrong when that happens.
+#
+# SHA256SUMS is what install.sh and `cdev upgrade` verify the downloaded
+# source tarball against before extracting it. It is computed here, in CI,
+# from the exact URL the installer itself downloads, rather than trusted
+# from anything GitHub reports about the tarball, so it is a real
+# independent check of what actually arrived over the wire.
 
 on:
   push:
@@ -23,19 +30,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Publish release and attach install.sh
+      - name: Compute SHA256SUMS
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          curl -fsSL --connect-timeout 5 --max-time 120 \
+            "https://github.com/$REPO/archive/refs/tags/$TAG.tar.gz" \
+            -o source.tar.gz
+          sha256sum source.tar.gz install.sh > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish release and attach install.sh and SHA256SUMS
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
-            # Re-running on an existing release replaces the asset rather
+            # Re-running on an existing release replaces the assets rather
             # than failing, so a re-run of this job is harmless.
-            gh release upload "$TAG" install.sh --clobber
+            gh release upload "$TAG" install.sh SHA256SUMS --clobber
           else
             gh release create "$TAG" \
               --title "cdev $TAG" \
               --notes "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/CHANGELOG.md) for what changed." \
-              install.sh
+              install.sh SHA256SUMS
           fi
