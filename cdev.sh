@@ -7,7 +7,7 @@
 # `cdev healthcheck` the same way a human would, by the binary's absolute
 # path (%h/.local/bin/cdev).
 
-CDEV_VERSION="0.8.0"
+CDEV_VERSION="0.9.0"
 CDEV_REGISTRY="$HOME/.cdev-sessions"
 CDEV_REGISTRY_LOCK="$CDEV_REGISTRY.lock"
 CDEV_REPO="${CDEV_REPO:-pimlabs/cdev}"
@@ -91,6 +91,19 @@ _cdev-ensure() {
   # a brand new project that has no directory yet, so create it rather than
   # fail and make the user do this by hand first.
   mkdir -p "$dir"
+
+  # Every session is spawned with --spawn=worktree below, which needs $dir
+  # to already be a git repository, a brand new project directory naturally
+  # isn't one yet. Found live on a VPS: without this, the session dies with
+  # "Worktree mode requires a git repository", indistinguishable from the
+  # workspace-trust failure above until that one gets fixed first, since
+  # trust is checked before the worktree requirement. Guarded on git being
+  # present at all, same reasoning as the tmux/claude presence guards
+  # elsewhere: if it's missing, remote-control's own error is still clear,
+  # this would just be a second, redundant one.
+  if command -v git >/dev/null 2>&1 && ! git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git init "$dir" >/dev/null 2>&1
+  fi
 
   # A same-named session that exists but is dead blocks `new-session` below
   # with "duplicate session", so it has to be cleared first, not just

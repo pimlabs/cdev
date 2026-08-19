@@ -45,7 +45,9 @@ bats test/            # needs bats-core installed, it is not vendored here
 - `test/cdev_ensure.bats` registry dedup in `_cdev-ensure`, `_cdev-session-alive`
   distinguishing a dead-but-`remain-on-exit`-held pane from a genuinely live
   one, `_cdev-ensure` killing and recreating a session left in that dead
-  state, and that it creates the session directory when it doesn't exist
+  state, that it creates the session directory when it doesn't exist, and
+  that it `git init`s a brand new one but leaves an already-initialized
+  repository (its existing commits included) untouched
 - `test/cdev_kill.bats` registry line removal in `_cdev-kill` (the `cdev kill` subcommand)
 - `test/account_config_dir.bats` account to `CLAUDE_CONFIG_DIR` mapping
 - `test/install_shell_detection.bats` rc file `install.sh` falls back to for
@@ -223,12 +225,17 @@ prefix.
   creates `dir` first if it does not exist yet (tmux refuses a working
   directory that is missing, and the natural way to use `cdev <name>
   [account] [dir]` is for a brand new project that has no directory at
-  all), and kills a same-named session left behind with a dead pane before
-  creating a fresh one, `tmux new-session` would otherwise fail with
-  "duplicate session" against the leftover. It is also the one function
-  called non-interactively, so it must stay safe to run with no attached
-  terminal (no prompts, no blocking reads), since the boot path depends on
-  that.
+  all), `git init`s it too if it is not already a repository (every session
+  is spawned with `--spawn=worktree`, which needs one; found live on a VPS
+  the day after the trust-retry fix above shipped: a brand new project,
+  exactly the case that fix targets, died right after with "Worktree mode
+  requires a git repository", a second, separate failure only visible once
+  the trust one was out of the way, since trust is checked first), and
+  kills a same-named session left behind with a dead pane before creating a
+  fresh one, `tmux new-session` would otherwise fail with "duplicate
+  session" against the leftover. It is also the one function called
+  non-interactively, so it must stay safe to run with no attached terminal
+  (no prompts, no blocking reads), since the boot path depends on that.
 - `_cdev-restore` replays every line of the registry through `_cdev-ensure`.
   This is what the boot path runs. `cdev.sh` can still be sourced directly
   (tests do this, and nothing stops a user from doing the same), and `set -e`

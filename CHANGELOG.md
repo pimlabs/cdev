@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-20
+
+### Fixed
+
+- `cdev <name> [account] [dir]` now `git init`s a brand new project directory, not just `mkdir -p`s it. Every session is spawned with `--spawn=worktree`, which needs `dir` to already be a git repository, so a genuinely new project (the normal case this command exists for) died with "Worktree mode requires a git repository", a separate failure from the workspace-trust one, surfacing only once trust was out of the way since that check runs first. Guarded on `git` being present at all; if it's missing, `remote-control`'s own error is still the clear one
+
 ## [0.8.0] - 2026-08-20
 
 ### Fixed
@@ -107,7 +113,8 @@ old `cdev-status`, `cdev-kill`, `cdev-init`, `cdev-accounts`, and
 - `_cdev-ensure`'s dedup check now passes `--` to grep. Without it a registry line starting with a dash was read by grep as its own options, so the check failed and the line was appended again on every call
 - `_cdev-restore` iterates over a snapshot of the registry rather than the live file. Combined with the dedup bug above, reading the file while `_cdev-ensure` appended to it turned the loop into one that never ended and a registry that grew without limit (a real run reached 12,657 identical lines)
 
-[Unreleased]: https://github.com/pimlabs/cdev/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/pimlabs/cdev/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/pimlabs/cdev/releases/tag/v0.9.0
 [0.8.0]: https://github.com/pimlabs/cdev/releases/tag/v0.8.0
 [0.7.0]: https://github.com/pimlabs/cdev/releases/tag/v0.7.0
 [0.6.0]: https://github.com/pimlabs/cdev/releases/tag/v0.6.0
