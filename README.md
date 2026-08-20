@@ -51,10 +51,14 @@ curl -fsSL https://cdev.pimlabs.id/install | bash
 ```
 
 That is the one-line install, the same shape as Bun, rustup, or Docker's.
-`cdev.pimlabs.id/install` is a permanent redirect to
-`https://github.com/pimlabs/cdev/releases/latest/download/install.sh`, which
-works today on its own if the redirect isn't live yet or you'd rather not
-depend on the subdomain:
+`cdev.pimlabs.id/install` is served by a small Cloudflare Worker
+([deploy/cloudflare](deploy/cloudflare)) that fetches `install.sh` from the
+latest tagged release and streams it back, rather than a plain redirect: a
+redirect that curl doesn't follow (no `-L`) returns an empty pipe with no
+error at all, and a Worker can fetch GitHub from Cloudflare's edge and fail
+loudly instead. `?ref=vX.Y.Z` installs a specific past release. The GitHub
+URL it serves from works today on its own if you'd rather not depend on the
+subdomain:
 
 ```bash
 curl -fsSL https://github.com/pimlabs/cdev/releases/latest/download/install.sh | bash

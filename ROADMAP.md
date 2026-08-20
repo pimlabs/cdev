@@ -394,6 +394,46 @@ branch; `claude`'s own worktree logic does not have that fallback.
 - [x] Added a test asserting `git rev-parse HEAD` resolves after
       `_cdev-ensure` on a brand new directory, not just that it's a repo.
 
+The "one piece remains, and it is not code" DNS redirect above was replaced
+outright on 20 August 2026, following the same Worker pattern just adopted in
+`agentop`. The redirect itself was the bug it was warning about: `curl -fsS
+https://cdev.pimlabs.id/install` returned a 301 with an HTML body and exit
+code 0, since `-f` only catches 4xx/5xx, so the documented one-liner (no
+`-L`) silently ran bash on an HTML redirect page instead of the script.
+
+- [x] `deploy/cloudflare/worker.js` and `wrangler.toml` serve `install.sh`
+      at `cdev.pimlabs.id/install` and `/install.sh` directly from GitHub's
+      edge, fetched fresh on every request (`cache-control: public,
+      max-age=0, must-revalidate`, matching bun/pnpm/starship/poetry), with
+      the client's `if-none-match` forwarded upstream so a revalidation is a
+      304, and a 502 naming the file and upstream status on failure instead
+      of an empty pipe.
+- [x] Deliberately not a copy of agentop's Worker: agentop's install.sh
+      lives on `main` and its Worker defaults `ref` there, cdev's must
+      always resolve to a tagged release (the constraint two paragraphs up),
+      so this Worker resolves GitHub's `/releases/latest` redirect for the
+      newest tag instead, the same approach `_cdev-latest-tag` already uses
+      and for the same reason, no GitHub API, no unauthenticated rate limit.
+      `?ref=vX.Y.Z` pins a specific past release; validated against the same
+      tag shape as the resolved-latest path rather than agentop's looser
+      charset, which would otherwise let `ref=../../other/repo/main` escape
+      the intended path segment and turn the Worker into an open proxy.
+- [x] `.wrangler/` added to `.gitignore` *before* running any `wrangler`
+      command, not after: it carries a Cloudflare account id and coarse
+      geolocation, and a sibling project already paid for this with a
+      history rewrite by adding the ignore line only after a `wrangler
+      deploy` and a `git add -A`.
+- [x] Two bugs only a real deploy surfaced, not the dry-run or local `dev`:
+      the zone's existing Cloudflare redirect rule for `/install` did not
+      automatically lose to the new Worker route and had to be disabled by
+      hand in the dashboard first; and a `routes` pattern with no trailing
+      `*` only matches a request with no query string at all, so `?ref=`
+      silently fell through to the zone's default origin (a different, very
+      Go-shaped 404 page, not the Worker's own) until both route patterns
+      picked up a `*`. `agentop`'s `wrangler.toml` has the same missing `*`
+      on its own routes, so its `?ref=` almost certainly has the identical
+      bug, not fixed here since that is a separate repo.
+
 ## Bigger scale (high effort, changes project philosophy)
 
 This moves cdev from a small, predictable single-box tool toward a small
