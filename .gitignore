@@ -18,3 +18,8 @@ Thumbs.db
 
 # Manual worktrees
 .claude/worktrees/
+
+# wrangler writes local dev state and an account cache beside the worker.
+# The cache carries a Cloudflare account id and the coarse geolocation of
+# whoever ran `wrangler dev`, neither of which belongs in the repo.
+deploy/cloudflare/.wrangler/

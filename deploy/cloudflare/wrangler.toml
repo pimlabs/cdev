@@ -1,0 +1,37 @@
+# Deploy with:
+#
+#   cd deploy/cloudflare
+#   npx wrangler login      # once, opens a browser
+#   npx wrangler dev        # run it locally on the real runtime first
+#   npx wrangler deploy
+#
+# Routes rather than a Custom Domain, on purpose: a Custom Domain makes the
+# Worker the origin for the whole hostname, and something else may already
+# answer on cdev.pimlabs.id. These two patterns claim two paths and nothing
+# else.
+#
+# Both end in `*`. Route pattern matching considers the whole request URL,
+# query string included, and a pattern with no wildcard only matches a
+# request with no query string at all: confirmed live, `/install` alone
+# returned 200 while `/install?ref=v0.9.0` fell straight through to whatever
+# else answers this hostname, 404, never reaching the Worker. The trailing
+# `*` is what lets ?ref= (see worker.js) actually work. Matching stays exact
+# in practice because worker.js itself looks up the precise pathname before
+# doing anything, so a request to some other `/install*` path the wildcard
+# also claims still gets a clean 404 from the Worker's own ROUTES check.
+#
+# Requirements, both already satisfied: the zone is active on the account, and
+# the DNS record for cdev.pimlabs.id is proxied by Cloudflare (this Worker
+# replaces the redirect rule that used to sit on that record, not the record
+# itself).
+
+name = "cdev-install"
+main = "worker.js"
+compatibility_date = "2026-08-20"
+
+workers_dev = false
+
+routes = [
+  { pattern = "cdev.pimlabs.id/install*", zone_name = "pimlabs.id" },
+  { pattern = "cdev.pimlabs.id/install.sh*", zone_name = "pimlabs.id" },
+]
